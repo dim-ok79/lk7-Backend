@@ -1,0 +1,85 @@
+{  
+   "menu":{  
+      "items":$P{WEB_LK_MODULES}
+   },
+   "pages":{  
+      "login":{  
+         "title":$P{WEB_LK_TITLE_LOGIN},
+         "listAuth": $P{WEB_LK_LIST_AUTH},
+         "DogInfo": $P{WEB_LK_AUTH_DOG_INFO},
+         "DogPREVIEW_REQUIRED": $P{WEB_LK_PREVIEW_REQUIRED_DOG},
+         "CreatePatient": $P{WEB_LK_AUTH_CREATE_PATIENT},
+         "CreatePatientListParams": $P{WEB_LK_AUTH_CREATE_PATIENT_PARAMS},
+         "InfoReg": $P{WEB_LK_AUTH_INFO_REG},
+         "Auth_type": $P{WEB_LK_AUTH_TYPE},
+         "Auth_form_text": $P{WEB_LK_AUTH_FORMTEXT},
+         "Auth_ThisTest": false
+      },
+      "home":{  
+         "title":$P{WEB_LK_TITLE_HOME}
+      },
+      "abonements":{  
+         "title":$P{WEB_LK_TITLE_ABONEMENTS}
+      },
+	  "Pay": {
+		"showbalans":$P{WEB_LK_ABON_SHOW_BALANS},
+		"showFieldrealAmount":$P{WEB_LK_ABON_SHOW_FIELD_REALAMOUNT}
+	  },
+	 "showSostav":$P{WEB_LK_ABON_SHOW_SOSTAV},
+     "laboratory":{
+         "title":$P{WEB_LK_TITLE_LABORATORY},
+         "showPayerInfo":$P{WEB_LK_LAB_SHOW_PAYER},
+         "WEB_LK_LAB_TYPE":$P{WEB_LK_LAB_TYPE},
+         "WEB_LK_LAB_SHOW_RES_ONLY_PDF":$P{WEB_LK_LAB_SHOW_RES_ONLY_PDF}
+     },
+     "history":{
+         "title":$P{WEB_LK_TITLE_HISTORY}
+     },
+     "personal":{
+         "title":$P{WEB_LK_TITLE_PERSONAL}
+         ,"WEB_LK_ACCESS_STATEMENT":$P{WEB_LK_ACCESS_STATEMENT}
+         ,"WEB_LK_INFO_HEADER_STATEMENT":$P{WEB_LK_INFO_HEADER_STATEMENT}
+         ,"WEB_LK_INFO_BODY_STATEMENT":$P{WEB_LK_INFO_BODY_STATEMENT}
+         ,"WEB_LK_INFO_BODY_STATEMENT":$P{WEB_LK_INFO_BODY_STATEMENT}
+	     ,"SHOW_PANEL_DOC_OLD": 0
+     },
+      "todoctor":{  
+         "title":$P{WEB_LK_TITLE_TO_DOCTOR}
+         , "WEB_LK_TALON_PRICE_INFO":$P{WEB_LK_TALON_PRICE_INFO}
+      },
+      "hdoctor":{  
+         "title":$P{WEB_LK_TITLE_H_DOCTOR}
+      },
+      "payments":{  
+         "title":$P{WEB_LK_TITLE_PAYMENTS}
+         , "WEB_LK_FIN":$P{WEB_LK_FIN}
+         , "WEB_LK_FIN_HISTORY":$P{WEB_LK_FIN_HISTORY}
+         , "WEB_LK_FIN_PAY":$P{WEB_LK_FIN_PAY}
+         , "WEB_LK_PAY_GO_TXT" : $P{WEB_LK_PAY_GO_TXT}
+         , "WEB_LK_FIN_BALANS_TXT" : $P{WEB_LK_FIN_BALANS_TXT}
+         , "WEB_LK_PAY_LIFETIME" : $P{WEB_LK_PAY_LIFETIME}
+      },
+      "services":{  
+         "title":$P{WEB_LK_TITLE_SERVICES},
+         "WEB_LK_SERVICES_INFO":$P{WEB_LK_SERVICES_INFO}
+      },
+      "maps":{  
+         "title":null,
+	     "allGPS_COORDINATES":$P{WEB_LK_GPS_COORDINATES}
+      },
+      "recovery":{  
+         "title":null
+       , "WEB_LK_RECOVERY_TO_EMAIL":$P{WEB_LK_RECOVERY_TO_EMAIL}
+      }
+   },
+   "currency":[  
+      {  
+         "code":"1",
+         "symbol":" ₽"
+      },
+      {  
+         "code":"2",
+         "symbol":" ₸"
+      }
+   ]
+}

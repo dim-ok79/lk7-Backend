@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ошибка</title>
+    <style>
+        body{
+            background-color: #ECF0F5;
+            height: 100%;
+        }
+        .cls-blok{
+            width: 50%;
+            margin-left: auto;
+            margin-right: auto;
+            background-color: white;
+            border-radius: 7px;
+            padding: 60px;
+            margin-top: 20%;
+/*            box-shadow: 1px 1px 1px 2px rgb(230 229 229);*/
+        }
+        .cls-txt1{
+            text-align: center;
+            color: #76869C;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .cls-txt2{
+            margin-top: 5px;
+            text-align: center;
+            color: #C9CDCE;
+            font-size: 22px;
+        }
+
+        .cls-div-btn{
+            text-align: center;
+            margin: 45px;
+            margin-bottom: 0;
+            display: none;
+        }
+        .cls-btn{
+            min-height: 46px;
+            background-color: #9277FF;
+            color: white;
+            width: 44%;
+            border-radius: 22px;
+            font-size: large;
+            border: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="cls-blok">
+        <div class="cls-txt1">[txt1]</div>
+        <div class="cls-txt2">[txt2]</div>
+        <div class="cls-div-btn">
+            <button class="cls-btn" onclick="closeWin();">Закрыть</button>
+        </div>
+    </div>
+<script>
+    function closeWin(){
+        var customWindow = window.open('', '_blank', '');
+        customWindow.close();
+    }
+</script>
+</body>
+</html>

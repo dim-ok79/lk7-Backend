@@ -1,0 +1,816 @@
+CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
+
+  PROCEDURE set_context_userid AS
+    l_result VARCHAR2(256);
+  BEGIN
+    SELECT keyid
+      INTO l_result
+      FROM man
+     WHERE man.code = 'WEBREC_PAWEB'
+       AND rownum = 1;
+    solution_med.gsp_set_context('USER_ID', l_result);
+  EXCEPTION
+    WHEN no_data_found THEN
+      l_result := 1;
+      solution_med.gsp_set_context('USER_ID', l_result);
+    WHEN OTHERS THEN
+      l_result := 1;
+      solution_med.gsp_set_context('USER_ID', l_result);
+  END set_context_userid;
+
+  FUNCTION get_template_html(p_code IN VARCHAR2) RETURN CLOB IS
+    res CLOB;
+  BEGIN
+    SELECT t.text
+      INTO res
+      FROM inetuser.WS_HTML_TEMPLATE_TEXT t
+     WHERE t.code = p_code;
+    RETURN res;
+  EXCEPTION
+    WHEN OTHERS THEN
+      RETURN NULL;
+  END get_template_html;
+
+  PROCEDURE get_param(p_code IN VARCHAR2
+                     ,p_rc   IN OUT pkg_global.ref_cursor_type) AS
+    l_param_text param.text%TYPE;
+  BEGIN
+    SELECT MAX(p.text)
+      INTO l_param_text
+      FROM solution_med.param p
+     WHERE p.code = p_code;
+
+    IF l_param_text = 'QUERY' THEN
+      OPEN p_rc FOR
+        SELECT 0 AS ptype -- текст
+              ,get_template_html(p_code) AS pval
+          FROM dual
+         WHERE p_code = p_code;
+    ELSE
+      OPEN p_rc FOR
+        SELECT ptype
+              ,decode(to_number(ptype), 0, text, 1, codei, 2, codei, 3, codef) AS pval
+          FROM solution_med.param
+         WHERE code = p_code
+           AND rownum = 1;
+    END IF;
+  END get_param;
+
+  PROCEDURE server_log(p_session_id IN VARCHAR2
+                      ,p_action     IN VARCHAR2
+                      ,p_ip_address IN VARCHAR2
+                      ,p_browser    IN VARCHAR2
+                      ,p_os         IN VARCHAR2
+--                      ,p_patient_id IN OUT NUMBER
+                      ,p_patient_id IN NUMBER
+                      ,p_success    IN NUMBER
+                      ,p_url        IN VARCHAR2
+                      ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+    l_log_level  NUMBER := 0;
+    l_rnumb_id   NUMBER;
+    l_text       VARCHAR(4000) := '';
+    l_doc_fio    VARCHAR2(256);
+    l_dat_rnumb  VARCHAR2(256);
+    l_find_str   VARCHAR2(256);
+    l_find_token VARCHAR2(256);
+    l_patient_id NUMBER;
+    p_rc1         pkg_global.ref_cursor_type;
+  BEGIN
+    IF p_patient_id IS NOT NULL THEN
+         l_patient_id := p_patient_id;
+    END IF;
+
+    IF (p_success != 1) THEN
+      l_log_level := 2;
+    END IF;
+
+    IF p_action = 'ESIAREG' THEN
+      l_text := 'Регистрация через Гос-услуги';
+    END IF;
+
+    IF p_action = 'COMMISSION' THEN
+      l_text := 'Заявка на отборочную комисию';
+    END IF;
+
+    IF p_action = 'ESIAREGLOGIN' THEN
+      l_text := 'Создание пароля';
+    END IF;
+
+    IF p_action = 'AUTHESIA' THEN
+      l_text := 'Вход через Гос-услуги';
+    END IF;
+
+    IF p_action = 'SENDPASSTOEMAIL' THEN
+      l_text := 'Восстановление пароля через почту';
+    ELSE
+      IF p_action = 'CHANGEPASSTOEMAIL' THEN
+        IF p_success = 1 THEN
+          l_text       := 'Смена пароля, восстановление.';
+          l_find_str   := '/changepasswd/token/';
+          l_find_token := substr(p_url, instr(p_url, l_find_str, 1) + length(l_find_str));
+          SELECT MAX(patient_id)
+            INTO l_patient_id
+            FROM inetuser.wa_token
+           WHERE token = TRIM(l_find_token);
+        ELSE
+          l_text := 'Попытка смены пароля, восстановление.';
+        END IF;
+    ELSE
+        IF p_action = 'AUTH' THEN
+          l_text := 'Авторизация';
+          IF l_patient_id IS NOT NULL THEN
+            /*отправка почтового почтового сообщения об успешной авторизации пациента*/
+            send_email_auth_success(p_session_id => p_session_id
+                                                 ,p_action     => p_action
+                                                 ,p_ip_address => p_ip_address
+                                                 ,p_browser    => p_browser
+                                                 ,p_os         => p_os
+                                                 ,p_patient_id => l_patient_id
+                                                 ,p_success    => p_success
+                                                 ,p_url        => p_url
+                                                 ,p_rc         => p_rc1);
+          ELSE
+            l_text := l_text || ' (Неправильно указан логин/пароль)';
+          END IF;
+        ELSE
+          IF p_action = 'AUTHPHONE' THEN
+            IF nvl(p_success, 0) = 1 THEN
+              l_text := 'Авторизация через телефон';
+            ELSIF nvl(p_success, 0) = 0 THEN
+              l_text := 'Авторизация по телефону не удалось';
+            END IF;
+          ELSE
+          IF p_action = 'CHANGE_PWD' THEN
+            IF nvl(p_success, 0) = 1 THEN
+              l_text := 'Вы сменили пароль';
+            ELSIF nvl(p_success, 0) = 0 THEN
+              l_text := 'Сменить пароль не удалось';
+            END IF;
+          ELSE
+            IF p_action = 'APPOINTMENT' THEN
+              IF p_success = 1 THEN
+                SELECT to_number(regexp_substr(p_url, '[0-9]+'))
+                  INTO l_rnumb_id
+                  FROM dual;
+                IF nvl(l_rnumb_id, 0) != 0 THEN
+                  SELECT fn_doc_short_name_by_ddid(rn.docdepid)
+                        ,to_char(rn.dat, 'dd.mm.yyyy hh24:mi')
+                    INTO l_doc_fio
+                        ,l_dat_rnumb
+                    FROM solution_med.rnumb rn
+                   WHERE rn.keyid = l_rnumb_id;
+                END IF;
+                l_text := 'Вы записались к врачу ' || l_doc_fio || ' на ' || l_dat_rnumb;
+              ELSE
+                l_text := 'Запись на прием не получилась';
+              END IF;
+            ELSE
+              IF p_action = 'CANSELLAPPOINTMENT' THEN
+
+                SELECT to_number(regexp_substr(p_url, '[0-9]+'))
+                  INTO l_rnumb_id
+                  FROM dual;
+                IF nvl(l_rnumb_id, 0) != 0 THEN
+                  SELECT fn_doc_short_name_by_ddid(rn.docdepid)
+                        ,to_char(rn.dat, 'dd.mm.yyyy hh24:mi')
+                    INTO l_doc_fio
+                        ,l_dat_rnumb
+                    FROM solution_med.rnumb rn
+                   WHERE rn.keyid = l_rnumb_id;
+/*                  l_text := 'Отмена записи на прием к ' || l_doc_fio || ' на ' || l_dat_rnumb ||
+                            ' была выполнена самим пациентом ';
+*/
+                    l_text := 'Вы отменили запись на прием к врачу ' || l_doc_fio || ' на ' || l_dat_rnumb;
+                ELSE
+                  l_text := 'Отмена записи на прием была выполнена';
+                END IF;
+
+              END IF; -- CANSELLAPPOINTMENT
+            END IF; -- APPOINTMENT
+            END IF; -- AUTHPHONE
+          END IF; ---1 CHANGE_PWD
+        END IF; -- AUTH
+      END IF;
+    END IF;
+
+    -- в случае успешной записи
+    /*
+      if p_action = 'APPOINTMENT' and p_success=1 then
+        SELECT to_number(REGEXP_SUBSTR(p_url, '[0-9]+')) into l_rnumb_id from dual;
+        l_text := 'Номерок '||to_char(l_rnumb_id);
+      end if;
+    */
+    IF (length(l_text) > 1) THEN
+      INSERT INTO inetuser.wa_log
+        (id
+        ,applic
+        ,session_id
+        ,dat
+        ,action
+        ,text
+        ,ip_address
+        ,browser
+        ,os
+        ,patient_id
+        ,log_level
+        ,success)
+      VALUES
+        (pkg_global.get_next_id('INETUSER', 'WA_LOG')
+        ,'pa_web_account'
+        ,p_session_id
+        ,SYSDATE
+        ,p_action
+        ,l_text
+        ,p_ip_address
+        ,p_browser
+        ,p_os
+        ,l_patient_id
+        ,l_log_level
+        ,p_success);
+
+    END IF;
+    OPEN p_rc FOR
+      SELECT 0 AS err_code
+            ,'' AS err_text
+        FROM dual;
+
+  END server_log;
+
+  PROCEDURE login(p_login IN VARCHAR2
+                 ,p_pass  IN VARCHAR2
+                 ,p_rc    IN OUT pkg_global.ref_cursor_type) AS
+    l_patient_id patient.keyid%TYPE;
+    l_email      VARCHAR2(1000);
+    l_result_rec pkg_global.result_rtype;
+  BEGIN
+
+    set_context_userid;
+
+    SELECT MAX(patient_id)
+      INTO l_patient_id
+      FROM inetuser.patient_logon pl
+     WHERE pl.status = 1
+       AND pl.logon_name = p_login
+       AND pl.pass = p_pass;
+
+    IF l_patient_id IS NULL THEN
+      l_result_rec.error_code := pkg_global.err_crit;
+      l_result_rec.error_text := 'Неверный логин или пароль!';
+    ELSIF nvl(p_admin.fn_get_param_value_number('506741'), 0) = 1 THEN
+      SELECT regexp_substr(note, '^[A-Za-z0-9]+[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,4}$')
+        INTO l_email
+        FROM patient p
+       WHERE p.keyid = l_patient_id;
+
+      IF l_email IS NULL THEN
+        l_result_rec.error_code := pkg_global.err_crit;
+        l_result_rec.error_text := 'Не указан почтовый адрес!';
+      END IF;
+    END IF;
+
+    OPEN p_rc FOR
+      SELECT l_patient_id            AS patient_id
+            ,l_result_rec.error_code AS err_code
+            ,l_result_rec.error_text AS err_text
+        FROM dual;
+  END login;
+
+  PROCEDURE patient_info(p_patient_id IN NUMBER
+                        ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      SELECT p.num -- Номер карты в ЛПУ
+            ,g_make_first_upper(p.lastname) AS lastname -- Фамилия
+            ,g_make_first_upper(p.firstname) AS firstname -- Имя
+            ,g_make_first_upper(p.secondname) AS secondname -- Отчество
+--            ,p.birthdate -- Дата рождения
+--            ,to_char(p.birthdate, 'dd.mm.yyyy HH24:MI') AS birthdateStr
+            ,to_char(p.birthdate, 'dd.mm.yyyy') AS birthdateStr
+            ,p.phone -- Номер телефона
+            ,p.cellular -- Номер сотового телефона
+            ,p.note AS email -- e-mail/факс
+            ,p.snils   -- снилс ИНН
+            ,gsp_get_pat_address(p.keyid, 2) AS address_proj -- Адрес проживания
+            ,(SELECT count(PL.ID) FROM inetuser.patient_logon pl
+                 WHERE pl.status = 1
+                       AND pl.patient_id = p_patient_id
+                       AND pl.logon_name IS NOT NULL
+                       AND pl.pass  IS NOT NULL)  AS count_login
+             ,p.sex
+        FROM patient p
+       WHERE p.keyid = p_patient_id;
+  END patient_info;
+
+  PROCEDURE send_email_auth_success(p_session_id IN VARCHAR2
+                                   ,p_action     IN VARCHAR2
+                                   ,p_ip_address IN VARCHAR2
+                                   ,p_browser    IN VARCHAR2
+                                   ,p_os         IN VARCHAR2
+                                   ,p_patient_id IN OUT NUMBER
+                                   ,p_success    IN NUMBER
+                                   ,p_url        IN VARCHAR2
+                                   ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+    l_lastname      VARCHAR2(100);
+    l_firstname     VARCHAR2(100);
+    l_secondname    VARCHAR2(100);
+    l_fio           VARCHAR2(100);
+    l_email_patient VARCHAR2(100);
+    l_logon_name    VARCHAR2(100);
+    l_to            VARCHAR2(512);
+    l_subject       VARCHAR2(512);
+    l_content_html  CLOB;
+
+  BEGIN
+
+    -- Получаем данные по пациенту
+    SELECT g_make_first_upper(p.lastname) AS lastname -- Фамилия
+          ,g_make_first_upper(p.firstname) AS firstname -- Имя
+          ,g_make_first_upper(p.secondname) AS secondname -- Отчество
+          ,p_pat.fio(p.keyid, 1) fio
+          ,p.note -- e-mail/факс
+          ,pa.logon_name
+      INTO l_lastname
+          ,l_firstname
+          ,l_secondname
+          ,l_fio
+          ,l_email_patient
+          ,l_logon_name
+      FROM patient                p
+          ,inetuser.patient_logon pa
+     WHERE p.keyid = p_patient_id
+       AND pa.patient_id = p.keyid;
+
+    IF length(l_email_patient) > 3 THEN
+      IF p_success = 1 THEN
+
+        SELECT l_lastname || ' ' || l_firstname || ' <' || l_email_patient || '>'
+              ,t.subject
+              ,REPLACE(
+               REPLACE(
+               REPLACE(
+               REPLACE(
+               REPLACE(
+               REPLACE(
+               REPLACE(
+               REPLACE(t.text, '[p_FIO]', l_lastname || ' ' || l_firstname)
+                             , '[p_DATE_TIME]', to_char(SYSDATE, 'dd.mm.yyyy') || ' в ' || to_char(SYSDATE, 'hh24:mi'))
+                             , '[p_IP_ADDRESS]', p_ip_address)
+                             , '[p_BROWSER]', p_browser)
+                             , '[p_OS]', p_os)
+                             , '[p_EMAIL_URL_LOGO]', c_email_url_logo)
+                             , '[p_EMAIL_INFO]', c_email_info)
+                             , '[p_EMAIL_PHONE]', c_email_phone)
+          INTO l_to
+              ,l_subject
+              ,l_content_html
+          FROM inetuser.WS_HTML_TEMPLATE_TEXT t
+         WHERE t.code = 'WEB_LK_auth_success';
+
+        pkg_ws_informer.send_email_html_sync(p_guid         => pkg_ws_informer.get_guid()
+                                            ,p_address_to   => l_to
+                                            ,p_subject      => l_subject
+                                            ,p_content_html => l_content_html
+                                            ,p_rc           => p_rc);
+      END IF;
+    ELSE
+      OPEN p_rc FOR
+        SELECT pkg_global.err_warn AS ERROR_CODE
+              ,'Не найдена электронная почта пользователя' AS error_text
+          FROM dual;
+    END IF;
+  END send_email_auth_success;
+
+  PROCEDURE get_patient_ext(p_patient_id     IN NUMBER
+                           ,p_rc             IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    /* Весь список доступов:
+       WEB_LK_MODULES = 'to-doctor,h-doctor,laboratory,history,services,payments,abonements,controls'
+    */
+      OPEN p_rc FOR
+        SELECT 'WEB_LK_MODULES0' AS name,
+            'to-doctor,h-doctor,history,services' AS value
+          FROM dual;
+/* Так добавить другие параметры
+          UNION ALL
+        SELECT 'WEB_LK_TEST' AS name,
+            'werwrwrwerew' AS value
+          FROM dual;
+*/
+  END get_patient_ext;
+
+/* Получить название ЛПУ */
+  FUNCTION fn_get_name_lpu(p_id      IN NUMBER) RETURN VARCHAR2 IS
+    l_result_value VARCHAR2(100);
+  BEGIN
+    l_result_value := '';
+    CASE (p_id)
+    WHEN 1 THEN l_result_value := 'Центральная поликлиника';
+    WHEN 3 THEN l_result_value := 'Валдайский многопрофильный медицинский центр';
+    WHEN 5 THEN l_result_value := 'Поликлиника, филиал №2 (научно-лечебный центр)';
+    WHEN 6 THEN l_result_value := 'Центр промышленной и морской медицины';
+    WHEN 7 THEN l_result_value := 'Поликлиника №1';
+    WHEN 8 THEN l_result_value := 'Поликлиника №3';
+    WHEN 9 THEN l_result_value := 'Поликлиника №6';
+    ELSE l_result_value := '';
+    END CASE;
+    return l_result_value;
+  END fn_get_name_lpu;
+
+/* Получить адрес ЛПУ */
+  FUNCTION fn_get_addres_lpu(p_id      IN NUMBER) RETURN VARCHAR2 IS
+    l_result_value VARCHAR2(100);
+  BEGIN
+    l_result_value := '';
+    CASE (p_id)
+    WHEN 1 THEN l_result_value := 'Санкт-Петербург, пр. Луначарского, д.49';
+    WHEN 3 THEN l_result_value := 'Новгородская область, г.Валдай, ул. Песчаная 1Б';
+    WHEN 5 THEN l_result_value := 'Санкт-Петербург, ул. Красина, д.4';
+    WHEN 6 THEN l_result_value := 'Санкт-Петербург, пр. Ленинский, д. 101, корп. 5.';
+    ELSE l_result_value := '';
+    END CASE;
+    return l_result_value;
+  END fn_get_addres_lpu;
+
+  FUNCTION fn_get_orderby_lpu(p_id      IN NUMBER) RETURN NUMBER IS
+    l_result_value NUMBER;
+  BEGIN
+    l_result_value := 0;
+    CASE (p_id)
+    WHEN 1 THEN l_result_value := 1;
+    WHEN 3 THEN l_result_value := 4;
+    WHEN 5 THEN l_result_value := 2;
+    WHEN 6 THEN l_result_value := 3;
+    ELSE l_result_value := 10;
+    END CASE;
+    return l_result_value;
+  END fn_get_orderby_lpu;
+
+  /**
+  * Получить список подразделений
+  */
+
+  PROCEDURE get_lpu_list(p_patient_id  IN NUMBER, p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      select v.* from (
+      select l.keyid as id, fn_get_orderby_lpu(l.keyid)as orderBY, fn_get_name_lpu(l.keyid) as name, fn_get_addres_lpu(l.keyid) as addres, 0 as isPatient
+      from solution_med.lpu l
+      where l.keyid not in (select l.keyid
+                           from patattach pa, lpu l
+                           where pa.patientid = p_patient_id
+                           and l.keyid = pa.lpuid)
+      and l.keyid not in (7,8,9,3)
+      UNION all
+      -- Список прикрепленных ЛПУ Пациента
+      select l.keyid as id,  fn_get_orderby_lpu(l.keyid)as orderBY, fn_get_name_lpu(l.keyid) as name, fn_get_addres_lpu(l.keyid) as addres, 1 as isPatient
+      from solution_med.lpu l
+      where l.keyid in (select l.keyid
+                       from patattach pa, lpu l
+                       where pa.patientid = p_patient_id
+                       and l.keyid = pa.lpuid)
+      or l.keyid in ( -- Поиск по шифрам
+        select vv.lpu from (
+            select count(a.keyid) as col, 8 as lpu
+            FROM agr a
+                ,agrpat d
+            WHERE a.keyid = d.agrid
+              AND d.patientid = p_patient_id
+              AND a.typ in ('1.01', '8.47', '27.91', '37.31') -- 27.10.4
+              AND (a.typ like  '1.01%' or a.typ like  '8.47%' or a.typ like  '27.91%'or a.typ like  '37.31%')
+        union all
+            select count(a.keyid) as col, 7 as lpu
+            FROM agr a
+                ,agrpat d
+            WHERE a.keyid = d.agrid
+              AND d.patientid = p_patient_id
+              AND a.typ in ('1.02', '1.16', '37.11', '8.236')
+              AND (a.typ like '1.02%' or a.typ like  '1.16%' or a.typ like  '37.11%'or a.typ like  '8.236%')
+        union all
+            select count(a.keyid) as col, 9 as lpu
+            FROM agr a
+                ,agrpat d
+            WHERE a.keyid = d.agrid
+              AND d.patientid = p_patient_id
+              AND (a.typ like '37.61%' or a.typ like  '5.11%' or a.typ like  '7.301%')
+        union all
+            select count(a.keyid) as col, 3 as lpu -- Валдай
+            FROM agr a
+                ,agrpat d
+            WHERE a.keyid = d.agrid
+              AND d.patientid = p_patient_id
+              AND (a.typ like '9.53%.7')
+        union all
+            select count(a.keyid) as col, 1 as lpu -- Центральная пол
+            FROM agr a
+                ,agrpat d
+            WHERE a.keyid = d.agrid
+              AND d.patientid = p_patient_id
+              AND (a.typ like '9.78%.71')
+        )vv
+        where vv.col >0
+      )
+      ) v
+      Order by v.orderBY;
+  END get_lpu_list;
+
+  /* Получение списка подписанных договоров по пациенту */
+  PROCEDURE contract_get_list_by_patient(p_patient_id IN NUMBER
+                                        ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      SELECT d.id
+            ,to_char(d.createdate, 'dd.mm.yyyy') dat
+            ,rl.text
+        FROM solution_data.documents    d
+            ,solution_form.report_list  rl
+            ,inetuser.web_form_contract w
+       WHERE d.tag = 7
+         AND d.patient_id = p_patient_id
+         AND d.type_id = fn_get_lu_id_by_tag_code(327, 798)
+         AND w.report_list_id = rl.keyid
+         AND w.patient_id = d.patient_id
+         AND w.documents_id = d.id
+--         AND 1=0
+       ORDER BY d.name;
+  END contract_get_list_by_patient;
+
+  /* Получение списка договоров на подпись при авторизации */
+  PROCEDURE contract_get_list_for_sig(p_patient_id IN NUMBER
+                                 ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      SELECT tfe.template_file_id AS template_id
+            ,rl.text              AS template_name
+        FROM solution_form.report_list       rl
+            ,solution_form.report_group      g
+            ,solution_data.template_file_use tfe
+       WHERE rl.report_group_id = g.keyid
+         AND rl.status = 1
+         AND g.code = 'WEB_ACCOUNT_NODE'
+         AND tfe.link_id = rl.keyid
+         AND tfe.tag = 1
+         AND NOT EXISTS (SELECT NULL
+                           FROM solution_data.documents    d
+                               ,inetuser.web_form_contract w
+                          WHERE d.tag = 7
+                            AND d.patient_id = p_patient_id
+                            AND w.report_list_id = rl.keyid
+                            AND w.documents_id = d.id)
+       ORDER BY rl.text;
+  END;
+
+  /* Получение содержимого подписанного договора */
+  PROCEDURE contract_get_blob(p_patient_id  IN NUMBER
+                             ,p_contract_id IN NUMBER
+                             ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      SELECT content AS bytes
+        FROM solution_data.documents d
+       WHERE d.id = p_contract_id;
+  END contract_get_blob;
+
+  /* Получение всех шаблонов odt */
+  PROCEDURE contract_get_all(p_rc          IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+/*
+    OPEN p_rc FOR
+      SELECT rl.template_file_id AS template_id
+            ,rl.text             AS template_name
+            ,t.content
+        FROM solution_form.report_list  rl
+            ,solution_form.report_group g
+            ,solution_data.template_file t
+       WHERE rl.report_group_id = g.keyid
+         AND rl.status = 1
+         AND g.code = 'WEB_ACCOUNT_NODE'
+         AND t.id = rl.template_file_id
+       ORDER BY rl.keyid;
+*/
+     OPEN p_rc FOR
+       SELECT tfe.template_file_id AS template_id
+            ,rl.text              AS template_name
+            ,t.content
+        FROM solution_form.report_list       rl
+            ,solution_form.report_group      g
+            ,solution_data.template_file     t
+            ,solution_data.template_file_use tfe
+       WHERE rl.report_group_id = g.keyid
+         AND rl.status = 1
+         AND g.code = 'WEB_ACCOUNT_NODE'
+         AND tfe.link_id = rl.keyid
+         AND tfe.tag = 1
+         AND t.id = tfe.template_file_id
+       ORDER BY rl.keyid;
+  END contract_get_all;
+
+  /* Получение информации по пациенту для документов */
+  PROCEDURE contract_get_params(p_patient_id  IN NUMBER
+                               ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+    l_dog_num VARCHAR2(100);
+    l_amount  NUMBER;
+  BEGIN
+    IF solution_root.pkg_global.is_procedure_exists('solution_med', 'pkg_web_account_unique', 'fn_get_dog_num') = 1 THEN
+      EXECUTE IMMEDIATE 'select pkg_web_account_unique.fn_get_dog_num(' || p_patient_id || ') from dual'
+        INTO l_dog_num;
+    END IF;
+
+    IF solution_root.pkg_global.is_procedure_exists('solution_med', 'pkg_web_account_unique', 'fn_get_dog_amount') = 1 THEN
+      EXECUTE IMMEDIATE 'select pkg_web_account_unique.fn_get_dog_amount(' || p_patient_id || ') from dual'
+        INTO l_amount;
+    END IF;
+
+    OPEN p_rc FOR
+      WITH tab AS
+       (SELECT regexp_substr(text, '\[[A-Za-z0-9\_]+\]', 1, LEVEL) AS text
+          FROM (SELECT t.note AS text
+                  FROM solution_form.report_group t
+                 WHERE t.code = 'WEB_ACCOUNT_NODE')
+        CONNECT BY regexp_substr(text, '\[[A-Za-z0-9\_]+\]', 1, LEVEL) IS NOT NULL),
+      pat AS
+       (SELECT nvl(l_dog_num, '         ') AS dog_num
+              ,p_pat.fio(p.keyid) AS fio
+              ,p_pat.fio(p.keyid, 1) AS fio_short
+              ,to_char(p.birthdate, 'dd.mm.yyyy') birthdate
+              ,nvl(p_pat.address(p.keyid, 1, 1), lpad(' ', 32, ' ')) AS addr1
+              ,nvl(p_pat.address(p.keyid, 2, 1), lpad(' ', 32, ' ')) AS addr2
+              ,nvl(p.note, lpad(' ', 15, ' ')) AS email
+              ,nvl(p.cellular, lpad(' ', 12, ' ')) AS phone
+              ,nvl(p.passser, lpad(' ', 7, ' ')) passser
+              ,nvl(p.passnumb, lpad(' ', 12, ' ')) passnumb
+              ,nvl(p.passissue, lpad(' ', 20, ' ')) passissue
+              ,nvl(to_char(p.passdate, 'dd.mm.yyyy'), lpad(' ', 15, ' ')) passissue_dat
+              ,to_char(SYSDATE, 'dd.mm.yyyy') print_dat
+              ,p_utils.date_to_russian(SYSDATE) || 'г.' print_dat_text
+              ,to_char(l_amount, 'fm9999G999G999G999G9990D00', 'NLS_NUMERIC_CHARACTERS = '', ''') amount
+          FROM patient p
+         WHERE p.keyid = p_patient_id)
+      SELECT REPLACE(REPLACE(text, '['), ']') AS text
+            ,val AS "value"
+        FROM (SELECT t.text
+                    ,p.dog_num AS val
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[dog_num]'
+              UNION ALL
+              SELECT t.text
+                    ,p.fio
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[fio]'
+              UNION ALL
+              SELECT t.text
+                    ,p.fio_short
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[fio_short]'
+              UNION ALL
+              SELECT t.text
+                    ,p.birthdate
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[birthdate]'
+              UNION ALL
+              SELECT t.text
+                    ,p.addr1
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[addr1]'
+              UNION ALL
+              SELECT t.text
+                    ,p.addr2
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[addr2]'
+              UNION ALL
+              SELECT t.text
+                    ,p.email
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[email]'
+              UNION ALL
+              SELECT t.text
+                    ,p.phone
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[phone]'
+              UNION ALL
+              SELECT t.text
+                    ,p.passser
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[passser]'
+              UNION ALL
+              SELECT t.text
+                    ,p.passnumb
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[passnumb]'
+              UNION ALL
+              SELECT t.text
+                    ,p.passissue
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[passissue]'
+              UNION ALL
+              SELECT t.text
+                    ,p.passissue_dat
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[passissue_dat]'
+              UNION ALL
+              SELECT t.text
+                    ,p.print_dat
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[print_dat]'
+              UNION ALL
+              SELECT t.text
+                    ,p.print_dat_text
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[print_dat_text]'
+              UNION ALL
+              SELECT t.text
+                    ,p.amount
+                FROM tab t
+                    ,pat p
+               WHERE t.text = '[amount]');
+  END contract_get_params;
+
+--                             ,p_blob        IN BLOB   VARCHAR2
+  /* Сохранение договора/согласия на пациенте */
+  PROCEDURE contract_save_pdf(p_patient_id  IN NUMBER
+                             ,p_template_id IN NUMBER
+                             ,p_blob        IN BLOB
+                             ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+    l_name       VARCHAR2(1000);
+    l_tag        NUMBER := 7;
+    l_type_id    NUMBER;
+    l_rl_id      NUMBER;
+    l_result_rec pkg_global.result_rtype;
+  BEGIN
+    SELECT rl.text || '.PDF '
+          ,rl.keyid
+      INTO l_name
+          ,l_rl_id
+      FROM solution_form.report_list       rl
+          ,solution_data.template_file_use tfe
+     WHERE tfe.link_id = rl.keyid
+       AND tfe.tag = 1
+       AND tfe.template_file_id = p_template_id
+       AND rl.status = 1
+       AND rownum = 1;
+
+    SELECT MAX(keyid)
+      INTO l_type_id
+      FROM lu l
+     WHERE l.tag = 327
+       AND l.rootcode = l_tag
+       AND l.code = 798;
+
+    --Сохранение документа на пациенте
+    l_result_rec.identity := pkg_global.get_next_id('SOLUTION_DATA', 'DOCUMENTS');
+
+    INSERT INTO solution_data.documents
+      (id
+      ,tag
+      ,NAME
+      ,link_id
+      ,patient_id
+      ,content
+      ,status
+      ,store_status
+      ,type_id)
+    VALUES
+      (l_result_rec.identity
+      ,l_tag
+      ,l_name
+      ,p_patient_id
+      ,p_patient_id
+      ,p_blob
+      ,1
+      ,-1
+      ,l_type_id);
+
+    --Сохранение связки документа на пациенте и документами "на подпись"
+    INSERT INTO inetuser.web_form_contract
+      (keyid
+      ,patient_id
+      ,report_list_id
+      ,documents_id)
+    VALUES
+      (pkg_global.get_next_id('INETUSER', 'WEB_FORM_CONTRACT')
+      ,p_patient_id
+      ,l_rl_id
+      ,l_result_rec.identity);
+
+    OPEN p_rc FOR
+      SELECT l_result_rec.identity AS id
+            ,l_result_rec.error_code AS err_code
+            ,'Документ успешно сохранен!' err_text
+        FROM dual;
+  END contract_save_pdf;
+
+
+END pkg_web_account_unique_7;

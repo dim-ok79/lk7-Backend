@@ -1,0 +1,136 @@
+CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
+  -- Author  : DDI V 7.0.0
+  -- Created : 01.07.2026
+  -- Purpose : Личный кабинет для web сервиса
+  /* Пакет для NodeJS */
+
+  /* Для вызова уникальной обработки проверяется наличие процедуры/функции из пакета p_web_account_unique
+  Пример проверки:
+
+  if solution_root.pkg_global.is_procedure_exists('solution_med', 'p_web_account_unique', '%PROCEDURE_name%') = 1 then
+    EXECUTE IMMEDIATE 'BEGIN p_web_account_unique.%PROCEDURE_name%(:b1); END;'
+      USING p_param;
+  END IF;
+
+  if solution_root.pkg_global.is_procedure_exists('solution_med', 'p_web_account_unique', '%FUNCTION_name%') = 1 then
+    EXECUTE IMMEDIATE 'SELECT p_web_account_unique.%FUCTION_name%(:b1) FROM DUAL'
+      INTO %l_RESULT%;
+      USING p_param;
+      RETURN %l_RESULT%
+  END IF;
+
+  Если процедура/функция отсутствует в уникальном пакете - используется стандартная.
+  */
+  
+  /* Для оповещений по email*/
+  -- логотип МО
+  c_email_url_logo CONSTANT VARCHAR2(1000) := pkg_global.get_constant_value('p_web_account_unique.c_EMAIL_URL_LOGO');
+  -- Номер телефона
+  c_email_phone CONSTANT VARCHAR2(1000) := pkg_global.get_constant_value('p_web_account_unique.c_EMAIL_PHONE');
+  -- Доп. инфо (слева снизу)
+  c_email_info CONSTANT VARCHAR2(1000) := pkg_global.get_constant_value('p_web_account_unique.c_EMAIL_INFO');
+  
+  
+  /**
+  * Установка идентификатора пользователя в контекст соединения
+  */
+  PROCEDURE set_context_userid;
+  
+  FUNCTION get_template_html(p_code IN VARCHAR2) RETURN CLOB;
+  
+  /**
+  * Получение значения параметра
+  * Параметры: p_code - код или номер параметра
+  **/
+  PROCEDURE get_param(p_code IN VARCHAR2
+                     ,p_rc   IN OUT pkg_global.ref_cursor_type);
+                     
+  /**
+   * Запись логов событий пациентов
+   *
+  **/
+  PROCEDURE server_log(p_session_id IN VARCHAR2
+                      ,p_action     IN VARCHAR2
+                      ,p_ip_address IN VARCHAR2
+                      ,p_browser    IN VARCHAR2
+                      ,p_os         IN VARCHAR2
+                       --                      ,p_patient_id IN OUT NUMBER
+                      ,p_patient_id IN NUMBER
+                      ,p_success    IN NUMBER
+                      ,p_url        IN VARCHAR2
+                      ,p_rc         IN OUT pkg_global.ref_cursor_type);
+  
+  /**
+  * Авторизация пользователя
+  * Параметры: p_login - логин
+  *            p_pass - пароль
+  **/
+  PROCEDURE login(p_login IN VARCHAR2
+                 ,p_pass  IN VARCHAR2
+                 ,p_rc    IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Получение информации о пользователе
+  * Параметры: p_patient_id - идентификатор пациента
+  **/
+  PROCEDURE patient_info(p_patient_id IN NUMBER
+                        ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Отправление почтового сообщения об успешной авторизации пациента
+  */
+  PROCEDURE send_email_auth_success(p_session_id IN VARCHAR2
+                                   ,p_action     IN VARCHAR2
+                                   ,p_ip_address IN VARCHAR2
+                                   ,p_browser    IN VARCHAR2
+                                   ,p_os         IN VARCHAR2
+                                   ,p_patient_id IN OUT NUMBER
+                                   ,p_success    IN NUMBER
+                                   ,p_url        IN VARCHAR2
+                                   ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Настройки пациента
+  */
+  PROCEDURE get_patient_ext(p_patient_id     IN NUMBER
+                           ,p_rc             IN OUT pkg_global.ref_cursor_type);
+                           
+/* Получить название ЛПУ */
+  FUNCTION fn_get_name_lpu(p_id      IN NUMBER) RETURN VARCHAR2;
+/* Получить адрес ЛПУ */  
+  FUNCTION fn_get_addres_lpu(p_id      IN NUMBER) RETURN VARCHAR2;
+  FUNCTION fn_get_orderby_lpu(p_id      IN NUMBER) RETURN NUMBER;
+                           
+  /**
+  * Получить список подразделений
+  */
+  PROCEDURE get_lpu_list(p_patient_id  IN NUMBER, p_rc       IN OUT pkg_global.ref_cursor_type);
+                  
+  /* Получение списка подписанных договоров по пациенту */
+  PROCEDURE contract_get_list_by_patient(p_patient_id IN NUMBER
+                                        ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  /* Получение списка договоров на подпись при авторизации */
+  PROCEDURE contract_get_list_for_sig(p_patient_id IN NUMBER
+                                     ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  /* Получение содержимого подписанного договора */
+  PROCEDURE contract_get_blob(p_patient_id  IN NUMBER
+                             ,p_contract_id IN NUMBER
+                             ,p_rc          IN OUT pkg_global.ref_cursor_type);
+
+  /* Получение всех шаблонов odt */
+  PROCEDURE contract_get_all(p_rc IN OUT pkg_global.ref_cursor_type);
+
+  /* Получение информации по пациенту для документов */
+  PROCEDURE contract_get_params(p_patient_id IN NUMBER
+                               ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  /* Сохранение договора/согласия на пациенте */
+  PROCEDURE contract_save_pdf(p_patient_id  IN NUMBER
+                             ,p_template_id IN NUMBER
+                             ,p_blob        IN BLOB
+                             ,p_rc          IN OUT pkg_global.ref_cursor_type);
+           
+
+END pkg_web_account_unique_7;

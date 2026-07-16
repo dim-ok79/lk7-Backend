@@ -1,0 +1,50 @@
+﻿<html>
+<head>
+    <meta http-equiv=Content-Type content="text/html; charset=UTF-8">
+    <script src="https://lk.med122.com:8445/js/JsBarcode.all.min.js"></script>
+</head>
+
+<script>
+    window.onload = function() {
+        var element = document.getElementById('barcodevisit');
+        var code = element.textContent;
+        JsBarcode("#barcodevisit", code);
+    };
+</script>
+
+
+<body>
+<p align=center style='margin-bottom:6.0pt;text-align:center'>
+  <span style='font-size:16.0pt;line-height:115%;font-family:"Times New Roman","serif"'>ФГБУ СЗОНКЦ им. Л.Г.Соколова ФМБА России</span>
+</p>
+
+<p align=center style='margin-bottom:6.0pt;text-align:center'><b style='mso-bidi-font-weight:normal'><span style='font-size:20.0pt;line-height:
+115%;font-family:"Times New Roman","serif"'>Талон плановой Госпитализации</span></b></p>
+
+<p align=center style='margin-bottom:6.0pt;text-align:center'><b style='mso-bidi-font-weight:normal'><span style='font-size:16.0pt;line-height:
+115%;font-family:"Times New Roman","serif"'>№ [p_num], [p_fio] </span></b></p>
+<p class=MsoNormal align=center style='margin-bottom:6.0pt;text-align:center'><span style='font-size:16.0pt;line-height:115%;font-family:"Times New Roman","serif"'>Ждем Вас в приемном отделении, 2 этаж</span></p>
+
+<p align=center style='text-align:center'><b style='mso-bidi-font-weight:
+normal'><span style='font-size:16.0pt;line-height:115%;font-family:"Times New Roman","serif"'>[p_time]</span></b><span style='font-size:16.0pt;line-height:115%;font-family:
+"Times New Roman","serif"'></span></p>
+
+<p align=center style='margin-bottom:6.0pt;text-align:center'><b style='mso-bidi-font-weight:normal'><span style='font-size:16.0pt;line-height:
+115%;font-family:"Times New Roman","serif"'>Просим Вас приходить строго в указанное время</span></b></p>
+
+<p align=center style='margin-bottom:6.0pt;text-align:center'><span style='font-size:16.0pt;line-height:115%;font-family:"Times New Roman","serif"'>Бюро госпитализации т. 558-98-39</span></p>
+
+<p align=center style='margin-bottom:6.0pt;text-align:center;font-size:16.0pt;'>
+    <span>Проверить</span>
+    <svg id="barcodevisit">[p_bar_code]</svg>
+</p>
+
+<p align=center style='margin-bottom:6.0pt;text-align:center'><span style='font-size:16.0pt;line-height:115%;font-family:"Times New Roman","serif"'>Приложите <span class=SpellE>штрихкод</span> к <span class=SpellE>инфомату</span></span></p>
+
+<p align=center style='margin-bottom:6.0pt;text-align:center'><span style='font-size:16.0pt;line-height:115%;font-family:"Times New Roman","serif"'>в приемном отделении для регистрации</span></p>
+
+<p style='margin-bottom:6.0pt'><span style='font-size:16.0pt;
+line-height:115%;font-family:"Times New Roman","serif"'></span></p>
+
+</body>
+</html>
