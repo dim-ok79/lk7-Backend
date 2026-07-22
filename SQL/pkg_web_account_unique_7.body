@@ -297,6 +297,7 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
                        AND pl.logon_name IS NOT NULL
                        AND pl.pass  IS NOT NULL)  AS count_login
              ,p.sex
+             , gsp_get_age_full_years(p.birthdate, SYSDATE) AS age -- Получаем возраст пациента
         FROM patient p
        WHERE p.keyid = p_patient_id;
   END patient_info;
