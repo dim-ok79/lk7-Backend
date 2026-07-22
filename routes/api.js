@@ -107,7 +107,7 @@ app.post("/api/login", function(req,res) {
                 })
 
                 // Создаем сессию
-                let s = global.session.add(token, tmp.PATIENT_ID, req);
+//                let s = global.session.add(token, tmp.PATIENT_ID, req);
 
                 // Склеиваем данные
                 let r = Object.assign( {token:token} , {patientId: tmp.PATIENT_ID});
@@ -150,7 +150,7 @@ app.post("/api/login", function(req,res) {
  */
 app.post("/api/logout", function(req,res) {
     // Удаляем сессию
-    global.session.deleteToReq(req);
+//    global.session.deleteToReq(req);
 
     res.json(format.getFormatRes(true, null, null));
 });
