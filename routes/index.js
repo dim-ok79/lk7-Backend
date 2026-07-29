@@ -94,6 +94,7 @@ app.use(require('./api'));            // Общая информация
 app.use(require('./lpu'));            // ЛПУ
 app.use(require('./contract'));       // Договора на подписание
 app.use(require('./patient'));        // Информация о пациенте
+app.use(require('./log'));            // Информация о пациенте (входы пациента)
 
 
 app.use('/img/spec', express.static('static/spec')); // для фотки специальностей (http://10.0.0.204:2018/photo/user1.jpg)
