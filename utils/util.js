@@ -6,5 +6,13 @@ async function loadModule(pathModule) {
     }
 }
 
+function loadModuleApp(app, pathModule) {
+    try {
+        app.use(require(pathModule));
+    } catch (err) {
+        console.error('Ошибка загрузки APP модуля:', err.message);
+    }
+}
 
 module.exports.loadModule = loadModule;
+module.exports.loadModuleApp = loadModuleApp;

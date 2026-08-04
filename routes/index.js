@@ -2,6 +2,8 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const cfg = require('../config');
 const format = require("../utils/format");
+const loadModuleApp = require("../utils/util");
+
 const app = express();
 const logger = require('../utils/logger')('R-Index');
 
@@ -95,6 +97,9 @@ app.use(require('./lpu'));            // ЛПУ
 app.use(require('./contract'));       // Договора на подписание
 app.use(require('./patient'));        // Информация о пациенте
 app.use(require('./log'));            // Информация о пациенте (входы пациента)
+
+app.use(require('./history'));        // Записи пациента
+app.use(require('./rnumb'));          // Номерки пациента
 
 
 app.use('/img/spec', express.static('static/spec')); // для фотки специальностей (http://10.0.0.204:2018/photo/user1.jpg)
