@@ -30,6 +30,61 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
   -- Доп. инфо (слева снизу)
   c_email_info CONSTANT VARCHAR2(1000) := pkg_global.get_constant_value('p_web_account_unique.c_EMAIL_INFO');
   
+    -- формат даты, для FRONT
+  format_date_front CONSTANT VARCHAR2(100) := 'dd.mm.yyyy hh24:mi';
+  -- формат даты, для параметров  входящих
+  format_date_in CONSTANT VARCHAR2(1000) := 'yyyy-mm-dd';--'YYYY-MM-DD';
+  
+  applic_name CONSTANT VARCHAR2(100) := 'pa_web_account';
+  
+  /*количество дней для отображения вперед от текущей даты*/
+  c_param_506721 CONSTANT NUMBER := greatest(nvl(p_admin.fn_get_param_value_number('506721'), 0), 0);
+  /*Номерки в самозаписи и личном кабинете. Учитывать пол и возраст для фильтрации врачей*/
+  c_param_506731 CONSTANT NUMBER := p_admin.fn_get_param_value_number('506731');
+  /*Номерки в личном кабинете. Правило отображения номерков в ЛК с учетом спец.отметок из справочника lu.29*/
+  -- null (пусто)  - отображаюся все номерки, как с отметками, так и без
+  -- 0 - отображать номерки без отметок из справочника lu.29
+  -- коды из lu.29, указываются через запятую
+  c_param_506750 CONSTANT VARCHAR2(1000) := p_admin.fn_get_param_value_text('506750');
+  
+  -- Метки для обычного    (0)
+  label_code_old CONSTANT VARCHAR2(100) :='924, 936, 940, 941, 943'; -- Убрал децкие , 949
+  label_code_kinder CONSTANT VARCHAR2(100) :='949';
+  -- Для видео конференции (1)
+  label_code_true_conf CONSTANT VARCHAR2(100) :='913';
+  
+-- Почта для платежей, пациент без почты
+  pay_params_email_def VARCHAR2(100) := 'cheque@med122.ru';
+  
+  
+  TYPE r_docdep IS RECORD(
+     doctorid doctor.keyid%TYPE
+    ,docdepid docdep.keyid%TYPE
+    ,depid    docdep.depid%TYPE
+    ,specid   lu.keyid%TYPE
+    ,lastname doctor.lastname%TYPE
+    ,firstname doctor.firstname%TYPE
+    ,secondname doctor.secondname%TYPE
+    ,positionid doctor.positionid%TYPE
+    --    ,duration NUMBER
+    );
+  TYPE t_docdep IS TABLE OF r_docdep;
+
+  TYPE r_rnumb IS RECORD(
+
+     rnumbid     rnumb.keyid%TYPE
+    ,dat         rnumb.dat%TYPE
+    ,dat1        DATE
+    ,docdepid    docdep.keyid%TYPE
+    ,paystatus   rnumb.paystatus%TYPE
+    ,mins        NUMBER
+    ,is_interval NUMBER
+    ,interval_id rnumb.keyid%TYPE
+    ,specid      NUMBER
+    ,stacid      NUMBER);
+
+  TYPE t_rnumb IS TABLE OF r_rnumb;
+  
   
   /**
   * Установка идентификатора пользователя в контекст соединения
@@ -131,6 +186,164 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
                              ,p_template_id IN NUMBER
                              ,p_blob        IN BLOB
                              ,p_rc          IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Получить лог событий пациента
+  *
+  * p_patient_id - идентификатор пациента
+  * p_first_date - дата начала поиска
+  * p_last_date - дата завершения поиска
+  * p_start - с какого элемента ведётся поиск (первый элемент - 1)
+  * p_end - по какой элемент ведётся поиск (включительно)
+  */
+  PROCEDURE get_log_by_patient(p_patient_id IN NUMBER
+                              ,p_begin_date IN DATE
+                              ,p_end_date  IN DATE
+                              ,p_start      IN NUMBER
+                              ,p_end        IN NUMBER
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+/**
+Всего событий по пациенту
+*/
+  PROCEDURE get_log_by_patient_size(p_patient_id IN NUMBER
+                                   ,p_begin_date IN DATE
+                                   ,p_end_date  IN DATE
+                                   ,p_rc         IN OUT pkg_global.ref_cursor_type);
+                                   
+  /**
+  * Получение Количества событий истории пациента
+  * Параметры: p_patient_id - идентификатор пациента
+  * p_begin_dat - начальная дата
+  * p_end_dat - конечная дата
+  **/
+  PROCEDURE get_history_events_size(p_patient_id IN NUMBER
+                               ,p_begin_dat  IN VARCHAR2
+                               ,p_end_dat    IN VARCHAR2
+                               ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+
+  /**
+  * Получение событий истории пациента
+  * Параметры: p_patient_id - идентификатор пациента
+  * p_begin_dat - начальная дата
+  * p_end_dat - конечная дата
+  **/
+  PROCEDURE get_history_events(p_patient_id IN NUMBER
+                           --                          ,p_select_dat  IN VARCHAR2
+                          ,p_begin_dat  IN VARCHAR2
+                          ,p_end_dat    IN VARCHAR2
+                           --                          ,p_to_date    IN DATE  -- на день
+                          ,p_start IN NUMBER
+                          ,p_end   IN NUMBER
+                          ,p_rc    IN OUT pkg_global.ref_cursor_type);
+                                   
+  /*Получение id структуры по по id отделения */
+  FUNCTION get_dep_root_id_by_dep_id(p_dep_id IN dep.keyid%TYPE) RETURN NUMBER;
            
+/*
+* Получить докторов по ЛПУ
+*/
+  FUNCTION valid_docdep_lpu(p_root_dep_ids IN VARCHAR2
+                       ,p_spec_id      IN NUMBER DEFAULT NULL
+                       ,p_doc_id       IN NUMBER DEFAULT NULL
+                       ,p_srv_ids      IN VARCHAR2 DEFAULT NULL
+                       ,p_patient_id   IN NUMBER
+                       ,p_lpu_id      IN NUMBER DEFAULT NULL) RETURN t_docdep
+    PIPELINED;
+  
+
+  /**
+  * Список доступных номерков
+  * Параметры:
+  **/
+  FUNCTION valid_rnumb(p_docdep_id  IN NUMBER DEFAULT NULL
+                      ,p_dat_from   IN DATE DEFAULT NULL
+                      ,p_dat_to     IN DATE DEFAULT NULL
+                      ,p_spec_id    IN NUMBER DEFAULT NULL
+                      ,p_stac_id    IN NUMBER DEFAULT NULL
+                      ,p_rectype    IN NUMBER
+                      ,p_patient_id IN NUMBER) RETURN t_rnumb
+    PIPELINED;
+    
+  /**
+  * Список талонов пациента
+  *
+  * @param int p_patient_id - идентификатор пациента
+  */
+  PROCEDURE get_rnumbs_by_patient(p_patient_id IN NUMBER
+                                 ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  PROCEDURE history_diagnostic(p_research_id IN NUMBER
+                              ,p_rc          IN OUT pkg_global.ref_cursor_type);
+
+  PROCEDURE history_visit(p_visit_id IN NUMBER
+                         ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Получить информацию о талоне
+  *
+  *p_rnumb_id - Идентификатор талона
+  */
+  PROCEDURE get_rnumb_info(p_rnumb_id IN NUMBER
+                          ,p_rc       IN OUT pkg_global.ref_cursor_type);
+    
+
+  /**
+  * Получение списка платежей услуг по пациенту
+  *p_patient_id - ссылка на пациента
+  **/
+  PROCEDURE payments_by_patient(p_patient_id IN NUMBER
+                               ,p_dat_from   IN DATE
+                               ,p_dat_to     IN DATE
+                               ,p_start      IN NUMBER
+                               ,p_end        IN NUMBER
+                               ,p_rc         IN OUT pkg_global.ref_cursor_type);
+  /**
+  * Получение количества платежей услуг по пациенту
+  *p_patient_id - ссылка на пациента
+  **/
+  PROCEDURE payments_by_patient_size(p_patient_id IN NUMBER
+                                    ,p_dat_from   IN DATE
+                                    ,p_dat_to     IN DATE
+                                    ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Создание платежа в зависимости от типа.
+  * Для штатной работы должны быть заполнены параметр 50 и 16150
+  */
+
+  PROCEDURE payment_temp(p_patientid      IN NUMBER
+                        ,p_payment_lu_tag IN NUMBER /*тип платежа (LU.TAG=24). Он же и тип и способ оплаты. Code 22 - Аванс Карта,Code 23-Расчет карта*/
+                        ,p_amount         IN NUMBER
+                         /*,p_payment_dat    IN DATE DEFAULT SYSDATE*/
+                        ,p_email  IN VARCHAR2
+                        ,p_phone  IN VARCHAR2
+                        ,p_police IN NUMBER
+                         /*,p_return_url     IN VARCHAR2*/
+                        ,p_rc IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Оплата Аванса.
+  * Для штатной работы должны быть заполнены параметр 50 и 16150
+  */
+
+  PROCEDURE payment_temp_avans(p_patientid   IN NUMBER
+                              ,p_amount      IN NUMBER
+                              ,p_payment_dat IN DATE DEFAULT SYSDATE
+                              ,p_rc          IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Получение баланса по пациенту
+  */
+  PROCEDURE get_balans_by_patient(p_patientid IN NUMBER
+                                 ,p_rc        IN OUT pkg_global.ref_cursor_type);
+
+  PROCEDURE get_payment_url(p_order_id IN inetuser.ws_pay_order.id%TYPE -- [число], идентификатор заказа в МИС
+                           ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+/* Получить почту по заказу */
+  PROCEDURE get_email_from_order(p_order_id IN inetuser.ws_pay_order.id%TYPE -- [число], идентификатор заказа в МИС
+                           ,p_rc       IN OUT pkg_global.ref_cursor_type);
 
 END pkg_web_account_unique_7;

@@ -216,7 +216,7 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
         ,success)
       VALUES
         (pkg_global.get_next_id('INETUSER', 'WA_LOG')
-        ,'pa_web_account'
+        ,applic_name
         ,p_session_id
         ,SYSDATE
         ,p_action
@@ -291,6 +291,7 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
             ,p.note AS email -- e-mail/факс
             ,p.snils   -- снилс ИНН
             ,gsp_get_pat_address(p.keyid, 2) AS address_proj -- Адрес проживания
+            ,gsp_get_pat_address(p.keyid, 1) AS address_proj_f -- Адрес Фактический 
             ,(SELECT count(PL.ID) FROM inetuser.patient_logon pl
                  WHERE pl.status = 1
                        AND pl.patient_id = p_patient_id
@@ -813,5 +814,1320 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
         FROM dual;
   END contract_save_pdf;
 
+  /**
+  * Получить лог событий пациента
+  *
+  * p_patient_id - идентификатор пациента
+  * p_first_date - дата начала поиска
+  * p_last_date - дата завершения поиска
+  * p_start - с какого элемента ведётся поиск (первый элемент - 1)
+  * p_end - по какой элемент ведётся поиск (включительно)
+  */
+  PROCEDURE get_log_by_patient(p_patient_id IN NUMBER
+                              ,p_begin_date IN DATE
+                              ,p_end_date  IN DATE
+                              ,p_start      IN NUMBER
+                              ,p_end        IN NUMBER
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    IF p_start IS NULL
+       OR p_end IS NULL THEN
+      OPEN p_rc FOR
+        SELECT id
+              ,session_id
+              ,to_char(dat, format_date_front) AS dat_str
+              ,action
+              ,text
+              ,ip_address
+              ,browser
+              ,os
+              ,log_level
+              ,success
+          FROM inetuser.wa_log
+         WHERE applic = applic_name
+           AND patient_id = p_patient_id
+           AND (p_begin_date IS NULL OR trunc(dat) >= p_begin_date)
+           AND (p_end_date IS NULL OR trunc(dat) <= p_end_date)
+         ORDER BY dat DESC;
+    ELSE
+      OPEN p_rc FOR
+        SELECT *
+          FROM (SELECT a.*
+                      ,rownum AS rnum
+                  FROM (SELECT id
+                              ,session_id
+                              ,to_char(dat, format_date_front) AS dat_str
+                              ,action
+                              ,text
+                              ,ip_address
+                              ,browser
+                              ,os
+                              ,log_level
+                              ,success
+                          FROM inetuser.wa_log
+                         WHERE applic = applic_name
+                           AND patient_id = p_patient_id
+                           AND (p_begin_date IS NULL OR trunc(dat) >= p_begin_date)
+                           AND (p_end_date IS NULL OR trunc(dat) <= p_end_date)
+                         ORDER BY dat DESC) a
+                 WHERE rownum <= p_end)
+         WHERE rnum >= p_start;
+    END IF;
+  END get_log_by_patient;
+
+/**
+Всего событий по пациенту
+*/
+
+  PROCEDURE get_log_by_patient_size(p_patient_id IN NUMBER
+                                   ,p_begin_date IN DATE
+                                   ,p_end_date  IN DATE
+                                   ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+      OPEN p_rc FOR
+        SELECT count(*) AS "size"
+          FROM inetuser.wa_log
+         WHERE applic = applic_name
+           AND patient_id = p_patient_id
+           AND (p_begin_date IS NULL OR trunc(dat) >= p_begin_date)
+           AND (p_end_date IS NULL OR trunc(dat) <= p_end_date)
+           ;
+
+  END get_log_by_patient_size;
+
+  /**
+  * Получение Количества событий истории пациента
+  * Параметры: p_patient_id - идентификатор пациента
+  * p_begin_dat - начальная дата
+  * p_end_dat - конечная дата
+  **/
+  PROCEDURE get_history_events_size(p_patient_id IN NUMBER
+                               ,p_begin_dat  IN VARCHAR2
+                               ,p_end_dat    IN VARCHAR2
+                               ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  l_begin_dat DATE;
+  l_end_dat   DATE;
+  BEGIN
+    l_begin_dat := to_date(p_begin_dat, format_date_in);
+    l_end_dat := to_date(p_end_dat, format_date_in);
+
+    OPEN p_rc FOR
+    SELECT count(*) AS "size"
+    FROM (
+      SELECT t.*,rownum AS rnum
+        FROM (SELECT v.keyid AS keyid
+                    ,'Консультация' AS typetext
+                    ,'visit' AS typehistory
+                    , v.dat
+                    ,(SELECT text
+                        FROM docdep
+                       WHERE keyid = v.doctorid) AS doctor
+                    ,(SELECT l.text
+                        FROM docdep d
+                            ,lu     l
+                       WHERE d.keyid = v.doctorid
+                         AND d.specid = l.keyid) AS spec
+                    ,NULL AS research_typ
+                    ,1 AS sortcode
+                    ,(select d.text from docdep dd,dep d where dd.keyid=v.doctorid and d.keyid=dd.depid) as dep_name
+                    ,v.doctorid as docid_exec
+                FROM visit v
+               WHERE patientid = p_patient_id
+                 AND trunc(v.dat) >= nvl(l_begin_dat, to_date('01.01.1900', 'dd.mm.yyyy'))
+                 AND trunc(v.dat) <= nvl(l_end_dat, SYSDATE)
+
+                 AND v.dat < SYSDATE --nvl(p_end_dat, SYSDATE + 5000)
+              UNION ALL
+              SELECT dr.id AS keyid
+                    ,'Диагностика' AS typetext
+                    ,'diag' AS typehistory
+                    ,dr.dat_perform AS dat
+
+                    ,(SELECT d.text AS doc_text
+
+                        FROM solution_diagnostic.res_doctors t
+                            ,solution_diagnostic.lu          l
+                            ,docdep                          d
+                       WHERE t.research_id = dr.id
+                         AND d.keyid = t.docdep_id
+                         AND t.role_id = l.id
+                         AND l.tag = 14
+                         AND l.code = (SELECT MIN(l.code)
+
+                                         FROM solution_diagnostic.res_doctors t
+                                             ,solution_diagnostic.lu          l
+                                             ,docdep                          d
+                                        WHERE t.research_id = dr.id
+                                          AND d.keyid = t.docdep_id
+                                          AND t.role_id = l.id
+                                          AND l.tag = 14)
+                          group by d.text) AS doctor
+                    ,NULL AS spec
+                    ,(SELECT rt.text AS research_typ
+                        FROM solution_diagnostic.research_typ rt
+                       WHERE rt.id = dr.research_typ_id) AS research_typ
+                    ,4 AS sortcode
+                    ,(select d.text from docdep dd,dep d  where dd.keyid=dr.doc_id and dd.depid=d.keyid) as dep_name
+                    ,dr.doc_id as docid_exec
+                FROM solution_diagnostic.research dr
+               WHERE patient_id = p_patient_id
+                 AND trunc(dr.dat_perform) >= nvl(l_begin_dat, to_date('01.01.1900', 'dd.mm.yyyy'))
+                 AND trunc(dr.dat_perform) <= nvl(l_end_dat, SYSDATE)
+
+                 AND dr.dat < SYSDATE --nvl(p_end_dat, SYSDATE + 5000)
+                 AND dat_perform IS NOT NULL) t
+       ORDER BY trunc(t.dat) DESC
+               ,t.sortcode
+               ,t.keyid) v;
+
+  END get_history_events_size;
+
+  /**
+  * Получение событий истории пациента
+  * Параметры: p_patient_id - идентификатор пациента
+  * p_begin_dat - начальная дата
+  * p_end_dat - конечная дата
+  **/
+  PROCEDURE get_history_events(p_patient_id IN NUMBER
+                          ,p_begin_dat  IN VARCHAR2
+                          ,p_end_dat    IN VARCHAR2
+                          ,p_start      IN NUMBER
+                          ,p_end        IN NUMBER
+                          ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+
+    l_param     NUMBER := c_param_506721;
+    l_begin_dat DATE;
+    l_end_dat   DATE;
+  BEGIN
+
+    l_begin_dat := to_date(p_begin_dat, format_date_in);
+    l_end_dat   := to_date(p_end_dat, format_date_in);
+
+    OPEN p_rc FOR
+/* */   
+      SELECT v.keyid
+            ,v.typetext
+            ,v.typehistory
+            ,to_char(v.dat, format_date_front) AS dat
+            ,v.doctor
+            ,v.doctorid
+            ,v.spec ,v.specid
+            ,v.sortcode
+            ,v.dep_name
+            ,v.count_files
+/*            
+            ,CASE
+               WHEN EXISTS (SELECT 1
+                       FROM docdep dd
+                           ,TABLE(valid_docdep_lpu(p_root_dep_ids => to_char(get_dep_root_id_by_dep_id(dd.depid))
+                                                            ,p_spec_id      => dd.specid
+                                                            ,p_doc_id       => dd.docid
+                                                            ,p_srv_ids      => NULL
+                                                            ,p_patient_id   => p_patient_id)) dd1
+                           ,TABLE(valid_rnumb(p_docdep_id  => dd1.docdepid
+                                                           ,p_dat_from   => l_begin_dat
+                                                           ,p_dat_to     => l_end_dat --SYSDATE + l_param
+                                                           ,p_patient_id => p_patient_id
+                                                           ,p_rectype => null)) rn
+                      WHERE dd.keyid = v.docid_exec
+                        AND rn.docdepid = dd1.docdepid) THEN
+                1
+               ELSE
+                0
+             END AS sched_exists_for_dd_on_visit
+*/
+, 0 AS sched_exists_for_dd_on_visit             
+        FROM (SELECT t.*
+                    ,rownum AS rnum
+                FROM (SELECT tt.*
+                        FROM (
+                        
+                        SELECT v.keyid AS keyid
+                                    ,'Консультация' AS typetext
+                                    ,'visit' AS typehistory
+                                    ,v.dat
+                                    ,dd.docid AS doctorid
+                                    ,(SELECT text
+                                        FROM docdep
+                                       WHERE keyid = v.doctorid) AS doctor
+                                    ,(SELECT l.text
+                                        FROM docdep d
+                                            ,lu     l
+                                       WHERE d.keyid = v.doctorid
+                                         AND d.specid = l.keyid) AS spec
+                                    ,(SELECT d.specid
+                                        FROM docdep d
+                                            ,lu     l
+                                       WHERE d.keyid = v.doctorid
+                                         AND d.specid = l.keyid) AS specid
+                                    ,NULL AS research_typ
+                                    ,1 AS sortcode
+                                    ,(SELECT d.text
+                                        FROM dep d -- docdep dd,
+                                       WHERE -- dd.keyid=v.doctorid and
+                                       d.keyid = dd.depid) AS dep_name
+                                    ,v.doctorid AS docid_exec
+                                    ,(select count(f.id)
+from solution_data.report_files f
+, solution_data.report_files_link fl
+, solution_reg.FORM_RESULT_IN fr
+where fl.report_files_id = f.id
+and fl.table_name = 'FORM_RESULT_IN'
+and fr.id = fl.link_id
+and fr.tag =1
+and fr.link_id = v.keyid) AS count_files
+                                FROM visit v
+                                JOIN docdep dd
+                                  ON dd.keyid = v.doctorid
+                               WHERE patientid = p_patient_id
+                                 AND v.dat < SYSDATE
+                                 AND trunc(v.dat) BETWEEN nvl(l_begin_dat, to_date('01.01.1900', 'dd.mm.yyyy')) AND
+                                     nvl(l_end_dat, SYSDATE)
+
+                              UNION ALL
+/* */
+                              SELECT dr.id AS keyid
+                                    ,'Диагностика' AS typetext
+                                    ,'diag' AS typehistory
+                                    ,dr.dat_perform AS dat
+                                    ,(SELECT d.docid
+                                        FROM solution_diagnostic.res_doctors t
+                                            ,docdep                          d
+                                       WHERE t.research_id = dr.id
+                                         AND d.keyid = t.docdep_id
+                                         AND t.role_id = (SELECT MIN(l.id)
+                                                            FROM solution_diagnostic.res_doctors
+                                                                ,solution_diagnostic.lu l
+                                                           WHERE research_id = t.research_id
+                                                             AND role_id = l.id
+                                                             AND l.tag = 14)
+                                         group by d.docid) AS doctorid
+                                    ,(SELECT d.text AS doc_text
+                                        FROM solution_diagnostic.res_doctors t
+                                            ,docdep                          d
+                                       WHERE t.research_id = dr.id
+                                         AND d.keyid = t.docdep_id
+                                         AND t.role_id = (SELECT MIN(l.id)
+                                                            FROM solution_diagnostic.res_doctors
+                                                                ,solution_diagnostic.lu l
+                                                           WHERE research_id = t.research_id
+                                                             AND role_id = l.id
+                                                             AND l.tag = 14)
+                                         group by d.text) AS doctor
+                                    ,NULL AS spec
+                                    ,NULL as specid
+                                    ,(SELECT rt.text AS research_typ
+                                        FROM solution_diagnostic.research_typ rt
+                                       WHERE rt.id = dr.research_typ_id) AS research_typ
+                                    ,4 AS sortcode
+                                    ,(SELECT d.text
+                                        FROM docdep dd
+                                            ,dep    d
+                                       WHERE dd.keyid = dr.doc_id
+                                         AND dd.depid = d.keyid) AS dep_name
+                                    ,dr.doc_id AS docid_exec
+                                    ,0 AS count_files
+                                FROM solution_diagnostic.research dr
+                               WHERE patient_id = p_patient_id
+                                 AND dr.dat < SYSDATE
+                                 AND trunc(dr.dat_perform) BETWEEN nvl(l_begin_dat, to_date('01.01.1900', 'dd.mm.yyyy')) AND
+                                     nvl(l_end_dat, SYSDATE)
+                                 AND dat_perform IS NOT NULL) tt
+                       ORDER BY tt.dat DESC
+                               ,tt.sortcode
+                               ,tt.keyid) t) v
+       WHERE v.rnum <= p_end
+         AND rnum >= p_start;
+
+  END get_history_events;
+
+  /*Получение id структуры по по id отделения */
+  FUNCTION get_dep_root_id_by_dep_id(p_dep_id IN dep.keyid%TYPE) RETURN NUMBER AS
+    l_result       dep.keyid%TYPE;
+    l_param_502004 NUMBER := 0; /*Несколько структур в ЛПУ*/
+  BEGIN
+
+    l_param_502004 := p_admin.fn_get_param_value_bool('502004');
+    IF l_param_502004 = 1 THEN
+      /*если в МИС настроена работа со структурами*/
+      IF p_dep_id > 0 THEN
+        SELECT d_root.keyid
+          INTO l_result
+          FROM dep d_root
+              ,dep d
+         WHERE d.keyid = p_dep_id
+           AND d_root.sortcode = substr(d.sortcode, 1, 3);
+      END IF;
+    ELSE
+      /*если в МИС не работают со структурами ЛПУ (для давних заказчиков)*/
+      IF p_dep_id > 0 THEN
+        SELECT d.keyid
+          INTO l_result
+          FROM dep d
+         WHERE d.keyid = p_dep_id;
+      END IF;
+    END IF;
+    RETURN l_result;
+
+  END;
+  
+/*
+* Получить докторов по ЛПУ
+*/
+  FUNCTION valid_docdep_lpu(p_root_dep_ids IN VARCHAR2
+                       ,p_spec_id      IN NUMBER DEFAULT NULL
+                       ,p_doc_id       IN NUMBER DEFAULT NULL
+                       ,p_srv_ids      IN VARCHAR2 DEFAULT NULL
+                       ,p_patient_id   IN NUMBER
+                       ,p_lpu_id      IN NUMBER DEFAULT NULL) RETURN t_docdep
+    PIPELINED IS
+    rec           t_docdep;
+    l_cmd         VARCHAR2(4000);
+    l_cmd_spec    VARCHAR2(1000);
+    l_cmd_doc     VARCHAR2(1000);
+    l_cmd_srv     VARCHAR2(1000);
+    l_cmd_age_sex VARCHAR2(1000);
+    l_cmd_dep     VARCHAR2(1000);
+    l_age         VARCHAR2(5) := NULL;
+    l_sex         VARCHAR2(5) := NULL;
+    l_cmd_lpu    VARCHAR2(4000);
+  BEGIN
+
+    l_cmd_lpu :=' ';
+    IF p_lpu_id IS NOT NULL AND p_lpu_id>0 THEN
+        l_cmd_lpu :=' AND dd.keyid IN (select d1.keyid
+                                          FROM attr a1, attr a2, attr a3, docdep d1
+                                         WHERE a1.rootid = 0
+                                           AND a1.tag = 6
+                                           AND a1.code = 1
+                                           AND a1.keyid = a2.rootid
+                                           AND a2.status = 1
+                                           AND a2.keyid = a3.rootid
+                                           and a3.linkid = d1.keyid
+                                           and d1.status = 1
+                                          and substr(fn_get_dep_sortcode(d1.depid), 1, 9) like
+       (select a2.sortcode
+          FROM attr a1, attr a2, attr a3
+         WHERE a1.rootid = 0
+           AND a1.tag = 67
+           AND a1.code = 202
+           AND a1.keyid = a2.rootid
+           AND a2.status = 1
+           AND a2.keyid = a3.rootid
+           and a3.linkid =(' || p_lpu_id || ')
+        ))';
+    ELSE
+-- Отключаем ВАЛДАЙ    
+        l_cmd_lpu :=' AND dd.keyid NOT IN (select d1.keyid
+                                          FROM attr a1, attr a2, attr a3, docdep d1
+                                         WHERE a1.rootid = 0
+                                           AND a1.tag = 6
+                                           AND a1.code = 1
+                                           AND a1.keyid = a2.rootid
+                                           AND a2.status = 1
+                                           AND a2.keyid = a3.rootid
+                                           and a3.linkid = d1.keyid
+                                           and d1.status = 1
+                                          and substr(fn_get_dep_sortcode(d1.depid), 1, 9) like
+       (select a2.sortcode
+          FROM attr a1, attr a2, attr a3
+         WHERE a1.rootid = 0
+           AND a1.tag = 67
+           AND a1.code = 202
+           AND a1.keyid = a2.rootid
+           AND a2.status = 1
+           AND a2.keyid = a3.rootid
+           and a3.linkid = 3
+        ))';
+        
+    END IF;
+
+    IF p_spec_id IS NOT NULL THEN
+      l_cmd_spec := ' and l_spec.keyid = ' || p_spec_id;
+    END IF;
+
+    IF p_doc_id IS NOT NULL THEN
+      l_cmd_doc := ' and d.keyid = ' || p_doc_id;
+    END IF;
+
+    IF p_srv_ids IS NOT NULL THEN
+      l_cmd_srv := ' and dd.keyid IN (SELECT ds1.docdepid FROM docserv ds1 WHERE ds1.srvdepid in (' || p_srv_ids || '))';
+    END IF;
+
+    IF c_param_506731 = 1
+       AND p_patient_id IS NOT NULL THEN
+      SELECT gsp_get_age_full_years(p.birthdate, SYSDATE)
+            ,p.sex
+        INTO l_age
+            ,l_sex
+        FROM patient p
+       WHERE p.keyid = p_patient_id;
+
+      l_cmd_age_sex := ' and ' || nvl(l_age, 0) || ' between nvl(get_age_for_out_specs(''FROM'', dd.keyid), 0) and nvl(get_age_for_out_specs(''TO'', dd.keyid), 150)
+       and get_sex_for_out_specs(' || l_sex || ', dd.keyid) = 1';
+    END IF;
+
+    IF p_root_dep_ids IS NOT NULL THEN
+      l_cmd_dep := ' and (fn_get_attr_link_id(dp.keyid, 7, 701, 1) in (' || p_root_dep_ids || ')
+                              OR  substr(dp.sortcode, 1, 3) IN (SELECT dp1.sortcode FROM dep dp1 WHERE dp1.keyid in (' || p_root_dep_ids || ')))';
+    END IF;
+
+    l_cmd := 'SELECT distinct d.keyid AS doctorid
+                                ,dd.keyid AS docdepid
+                                ,dd.depid AS depid
+                                ,dd.specid AS specid
+                                ,d.lastname AS lastname
+                                ,d.secondname AS secondname
+                                ,d.firstname AS firstname
+                                ,d.positionid AS positionid
+                            FROM docdep dd
+                                ,doctor d
+                                ,dep    dp
+                                ,lu     l_spec
+                           WHERE d.keyid = dd.docid
+                             AND d.status = 1
+                             AND dd.status = 1
+                             AND dp.keyid = dd.depid
+                             AND l_spec.keyid = dd.specid
+                             and exists(select null
+                                          from docserv ds
+                                         where ds.docdepid = dd.keyid
+                                           and nvl(pkg_attr.fn_is_object_in_attr_group(ds.srvdepid, 4, 5259, 1), 0) = 1
+                                       )
+                             AND dd.keyid NOT IN (SELECT d1.keyid /* Врачи, которых не нужно отображать для интернет-записи */
+                                                    FROM docdep d1
+                                                        ,attr   a1
+                                                        ,attr   a2
+                                                        ,attr   a3
+                                                   WHERE nvl(a1.rootid, 0) = 0
+                                                     AND a1.keyid = a2.rootid
+                                                     AND a2.keyid = a3.rootid
+                                                     AND a3.linkid = d1.keyid
+                                                     AND a1.tag = 6
+                                                     AND a1.code = 118)
+                             ' || l_cmd_lpu || '
+                             AND l_spec.keyid NOT IN (SELECT a3.linkid /* Список специальностей, не отображать в интернете */
+                                                        FROM attr a1
+                                                            ,attr a2
+                                                            ,attr a3
+                                                       WHERE nvl(a1.rootid, 0) = 0
+                                                         AND a1.keyid = a2.rootid
+                                                         AND a2.keyid = a3.rootid
+                                                         AND a1.tag = 21
+                                                         AND a1.code = 6)' || l_cmd_spec || l_cmd_doc ||
+             l_cmd_dep || l_cmd_srv || l_cmd_age_sex;
+            dbms_output.put_line(l_cmd);
+
+    EXECUTE IMMEDIATE l_cmd BULK COLLECT
+      INTO rec;
+
+    IF rec.count > 0 THEN
+      FOR i IN rec.first .. rec.last
+      LOOP
+        PIPE ROW(rec(i));
+      END LOOP;
+    END IF;
+
+    RETURN;
+  END;
+  
+  /**
+  * Список доступных номерков
+  * Параметры:
+  **/
+  FUNCTION valid_rnumb(p_docdep_id  IN NUMBER DEFAULT NULL
+                      ,p_dat_from   IN DATE DEFAULT NULL
+                      ,p_dat_to     IN DATE DEFAULT NULL
+                      ,p_spec_id    IN NUMBER DEFAULT NULL
+                      ,p_stac_id    IN NUMBER DEFAULT NULL
+                      ,p_rectype    IN NUMBER
+                      ,p_patient_id IN NUMBER) RETURN t_rnumb
+    PIPELINED IS
+    rec            t_rnumb;
+    l_cmd          CLOB;
+    l_cmd_cond     VARCHAR2(4000);
+    l_param_506750 VARCHAR2(100);
+    l_age          NUMBER;
+  BEGIN
+
+    IF p_patient_id IS NOT NULL THEN
+      SELECT gsp_get_age_full_years(p.birthdate, SYSDATE)
+        INTO l_age
+        FROM patient p
+       WHERE p.keyid = p_patient_id;
+    END IF;
+
+    IF p_rectype IS NULL THEN
+       l_param_506750 := c_param_506750; -- из параметра
+       ELSE
+       IF p_rectype = 0 THEN
+         l_param_506750 := label_code_old;
+/* */
+         IF p_patient_id IS NOT NULL THEN  -- не пошло - не понятно почему
+         --  Проверка на возраст пациента
+           IF l_age> 17 THEN
+             l_param_506750 := label_code_old;
+           ELSE
+             l_param_506750 := label_code_kinder;
+           END IF;
+         ELSE
+           l_param_506750 := label_code_old;
+         END IF;
+
+       END IF;
+       IF p_rectype =1 THEN -- Для видео конференции (1)
+         l_param_506750 := label_code_true_conf;
+       END IF;
+/*03-0832026 - отключил диспансеризацию       
+       IF p_rectype =2 THEN -- Для диспансеризации   (2)
+         l_param_506750 := label_code_disp;
+       END IF;
+*/       
+    END IF;
+
+    -- собираем условия запроса
+    IF p_docdep_id IS NOT NULL THEN
+      l_cmd_cond := l_cmd_cond || '
+      and r.docdepid = ' || p_docdep_id;
+    END IF;
+
+    IF p_spec_id IS NOT NULL THEN
+      l_cmd_cond := l_cmd_cond || '
+      and dd.specid = ' || p_spec_id;
+    END IF;
+
+    IF p_stac_id IS NOT NULL THEN
+      l_cmd_cond := l_cmd_cond || '
+      and r.stacid = ' || p_stac_id;
+    END IF;
+
+    l_cmd := 'SELECT r.keyid as rnumbid
+                    ,r.dat
+                    ,greatest(r.dat + p_utils.min_2day(r.mins), r.dat1) as dat1
+                    ,r.docdepid
+                    ,r.paystatus
+                    ,r.mins
+                    ,nvl(r.time_type, 0) as is_interval
+                    ,decode(r.time_type, 1, r.keyid, null) as interval_id
+                    ,dd.specid
+                    ,r.stacid
+               FROM rnumb r
+                   ,docdep dd
+              WHERE r.docdepid = dd.keyid
+                and r.dat > sysdate
+                and nvl(r.patientid, 0) = 0
+                and r.blstatus = 1
+                and r.status !=2  --кроме фиктивных
+                and nvl(r.edit_now_status, 0) = 0
+                and (''' || l_param_506750 || ''' IS NULL or nvl(fn_get_lu_code(r.stacid), 0) IN (SELECT * FROM TABLE(p_utils.text_to_table(''' || l_param_506750 || '''))))
+                and r.dat > gsp_char_2date(''' || p_dat_from || ''')
+                and trunc(r.dat) <= gsp_char_2date(''' || p_dat_to || ''')
+                ' || l_cmd_cond;
+--            dbms_output.put_line(l_cmd);
+--                 and (''' || c_param_506750 || ''' IS NULL or nvl(fn_get_lu_code(r.stacid), 0) IN (SELECT * FROM TABLE(p_utils.text_to_table(''' || c_param_506750 || '''))))
+
+    EXECUTE IMMEDIATE l_cmd BULK COLLECT
+      INTO rec;
+
+    IF rec.count > 0 THEN
+      FOR i IN rec.first .. rec.last
+      LOOP
+        PIPE ROW(rec(i));
+      END LOOP;
+    END IF;
+
+    RETURN;
+  END;
+  
+  /**
+  * Список талонов пациента
+  *
+  * @param int p_patient_id - идентификатор пациента
+  */
+  PROCEDURE get_rnumbs_by_patient(p_patient_id IN NUMBER
+                                 ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+
+    OPEN p_rc FOR
+    SELECT vv.* FROM(
+      SELECT r.keyid AS rnumb_id
+            , to_char(r.dat, format_date_front) AS dat_bgn
+            , to_char(r.dat + r.mins / (24 * 60), format_date_front) AS dat_end
+            ,r.room AS cab
+            ,(SELECT l.text
+                FROM lu l
+               WHERE l.keyid = dd.specid
+                 AND l.tag = 9) AS spec
+            ,(SELECT to_char(clob_agg(table_clob_list(sd.text, chr(10), 1)))
+                FROM srvdep sd
+                    ,patserv ps
+               WHERE r.visitid = ps.visitid
+                 AND ps.srvdepid = sd.keyid
+                 AND nvl(r.visitid, 0) <> 0) AS srv_text
+            ,dd.docid AS doctor_id
+            ,(SELECT d.firstname
+                FROM doctor d
+               WHERE d.keyid = dd.docid) AS firstname
+            ,(SELECT d.lastname
+                FROM doctor d
+               WHERE d.keyid = dd.docid) AS lastname
+            ,(SELECT d.secondname
+                FROM doctor d
+               WHERE d.keyid = dd.docid) AS secondname
+            ,(SELECT d.text
+                FROM dep d
+               WHERE d.keyid = get_dep_root_id_by_dep_id(dd.depid)) AS depname
+            ,(SELECT frv.text
+                FROM solution_reg.form_result_lpu       fr
+                    ,solution_reg.form_result_value_lpu frv
+                    ,solution_form.form_item            fi
+                    ,solution_form.form                 f
+               WHERE fr.link_id = get_dep_root_id_by_dep_id(dd.depid)
+                 AND fr.form_id = f.id
+                 AND frv.form_result_id = fr.id
+                 AND frv.form_item_id = fi.id
+                 AND f.code = 'FORM_CONTENT_DEP_WEB'
+                 AND upper(fi.code) = 'ADDRES') AS addr
+            ,(SELECT frv.text
+                FROM solution_reg.form_result_lpu       fr
+                    ,solution_reg.form_result_value_lpu frv
+                    ,solution_form.form_item            fi
+                    ,solution_form.form                 f
+               WHERE fr.link_id = get_dep_root_id_by_dep_id(dd.depid)
+                 AND fr.form_id = f.id
+                 AND frv.form_result_id = fr.id
+                 AND frv.form_item_id = fi.id
+                 AND f.code = 'FORM_CONTENT_DEP_WEB'
+                 AND upper(fi.code) = 'PHONE') AS phone
+            ,r.paystatus
+            ,NULL AS calc_sum
+            ,decode((SELECT l.code
+                      FROM lu    l
+                     WHERE r.stacid = l.keyid)
+                   ,913
+                   ,1
+                   ,0) is_telemed -- признак телемедицины
+                   ,(SELECT t.confer_url
+                       FROM inetuser.ws_pay_payment wpp
+                           ,inetuser.ws_pay_order   po
+                           ,inetuser.trueconf_info t
+                      WHERE po.payment_total_id = t.paymentid
+                        AND wpp.order_id = po.id
+                        AND wpp.paid_status = 1
+                        AND t.rnumbid = r.keyid) AS url_telemed  -- ссылка на конференцию
+/* Ссылка без оплаты
+                   ,(SELECT t.confer_url
+                       FROM inetuser.trueconf_info t
+                      WHERE t.rnumbid = r.keyid) AS url_telemed  -- ссылка на конференцию
+*/
+           , 'rnumb' AS type_r
+        FROM rnumb  r
+            ,docdep dd
+       WHERE r.dat > SYSDATE
+         AND r.docdepid = dd.keyid
+         AND r.patientid = p_patient_id
+     UNION ALL
+        SELECT v.keyid AS rnumb_id
+            , to_char(v.dat, format_date_front) AS dat_bgn
+            , to_char(v.dat, format_date_front) AS dat_end
+            ,'' AS cab
+            ,'' AS spec
+            ,'' AS srv_text
+            , null/*dd.keyid*/ AS doctor_id
+            ,''/*d.firstname*/ AS firstname
+            ,''/*d.lastname*/ AS lastname
+            ,''/*d.secondname*/ AS secondname
+/*            , NULL AS doctor_id
+            ,'' AS firstname
+            ,'' AS lastname
+            ,'' AS secondname
+*/
+            ,'Бюро госпитализации' AS depname
+            ,'пр. Луначарского, д.49' AS addr
+            ,'558-98-39' AS phone
+            ,0 AS paystatus
+            ,NULL AS calc_sum
+            ,0 AS is_telemed
+            ,NULL AS url_telemed  -- ссылка на конференцию
+             , 'visit' AS type_r
+        FROM visit v --, doctor d, docdep dd
+       WHERE v.patientid = p_patient_id
+       AND v.vistype=100
+      -- AND dd.keyid = v.docid
+      -- AND dd.docid=d.keyid
+       AND v.dat>SYSDATE) vv
+--       AND v.dat>SYSDATE) vv
+--       ) vv
+       ORDER BY vv.dat_bgn;
+
+  EXCEPTION
+    WHEN OTHERS THEN
+      OPEN p_rc FOR
+        SELECT pkg_global.err_crit     AS err_code
+              ,'Ошибка получения номерков.' AS err_text
+          FROM dual;
+  END get_rnumbs_by_patient;
+  
+  PROCEDURE history_diagnostic(p_research_id    IN NUMBER
+                              ,p_rc             IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    pkg_html.truncate_tmp_html();
+    p_hist_html.get_all_res_protocol_info(p_research_id, 0);
+    OPEN p_rc FOR
+    SELECT clob_agg(table_clob_list(t.text, chr(10), 0, row_num)) text
+    FROM tmp_html t
+    ORDER BY t.row_num;
+
+  END history_diagnostic;
+
+  PROCEDURE history_visit(p_visit_id    IN NUMBER
+                         ,p_rc             IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    pkg_html.truncate_tmp_html();
+    p_hist_html.get_visit_info(p_visit_id, 0);
+    OPEN p_rc FOR
+--    SELECT clob_agg(table_clob_list(t.text, chr(10), 0, row_num)) text
+    SELECT t.text, t.row_num
+    FROM tmp_html t
+    ORDER BY t.row_num;
+
+  END history_visit;
+
+  /**
+  * Получить информацию о талоне
+  *
+  *p_rnumb_id - Идентификатор талона
+  */
+  PROCEDURE get_rnumb_info(p_rnumb_id IN NUMBER
+                          ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+
+    OPEN p_rc FOR
+      SELECT r.keyid AS rnumb_id
+      , get_dep_root_id_by_dep_id(dd.depid)
+      , dd.depid
+--            ,r.dat AS dat_bgn
+            ,to_char(r.dat, 'dd.mm.yyyy HH24:MI') AS dat_bgn
+            ,to_char(r.dat + (1 / 24 / 60 * r.mins), 'dd.mm.yyyy HH24:MI') AS dat_end
+--            ,r.dat + (1 / 24 / 60 * r.mins) AS dat_end
+            ,r.room AS cab
+            ,(SELECT text
+                FROM lu
+               WHERE keyid = dd.specid) AS spec
+            ,(SELECT listagg(sd.text, CHR(10)) WITHIN GROUP  (ORDER BY ps.createdate)
+                FROM srvdep sd
+                    ,patserv ps
+               WHERE r.visitid = ps.visitid
+                 AND ps.srvdepid = sd.keyid
+                 AND nvl(r.visitid, 0) <> 0) AS srv_text
+            ,dd.docid AS doctor_id
+            ,d.lastname
+            ,d.firstname
+            ,d.secondname
+            ,(SELECT d.text
+                FROM dep d
+               WHERE d.keyid = get_dep_root_id_by_dep_id(dd.depid)) AS depname
+            ,(SELECT frv.text
+                FROM solution_reg.form_result_lpu       fr
+                    ,solution_reg.form_result_value_lpu frv
+                    ,solution_form.form_item            fi
+                    ,solution_form.form                 f
+               WHERE fr.link_id = get_dep_root_id_by_dep_id(dd.depid)
+                 AND fr.form_id = f.id
+                 AND frv.form_result_id = fr.id
+                 AND frv.form_item_id = fi.id
+                 AND f.code = 'FORM_CONTENT_DEP_WEB'
+                 AND upper(fi.code) = 'ADDRES') AS addr
+            ,(SELECT frv.text
+                FROM solution_reg.form_result_lpu       fr
+                    ,solution_reg.form_result_value_lpu frv
+                    ,solution_form.form_item            fi
+                    ,solution_form.form                 f
+               WHERE fr.link_id = get_dep_root_id_by_dep_id(dd.depid)
+                 AND fr.form_id = f.id
+                 AND frv.form_result_id = fr.id
+                 AND frv.form_item_id = fi.id
+                 AND f.code = 'FORM_CONTENT_DEP_WEB'
+                 AND upper(fi.code) = 'PHONE') AS phone
+            ,r.paystatus
+            ,r.visitid
+            ,NULL AS calc_sum
+            ,decode((SELECT l.code
+                      FROM lu    l
+                     WHERE r.stacid = l.keyid)
+                   ,913
+                   ,1
+                   ,0) is_telemed -- признак телемедицины
+                   ,(SELECT t.confer_url
+                       FROM inetuser.ws_pay_payment wpp
+                           ,inetuser.ws_pay_order   po
+                           ,inetuser.trueconf_info t
+                      WHERE po.payment_total_id = t.paymentid
+                        AND wpp.order_id = po.id
+                        AND wpp.paid_status = 1
+                        AND t.rnumbid = r.keyid) AS url_telemed  -- ссылка на конференцию
+        FROM rnumb  r
+            ,docdep dd
+            ,doctor d
+       WHERE r.docdepid = dd.keyid
+         AND dd.docid = d.keyid
+         AND r.keyid = p_rnumb_id;
+  END get_rnumb_info;
+
+  
+  /**
+  * Получение списка платежей услуг по пациенту
+  *p_patient_id - ссылка на пациента
+  **/
+  PROCEDURE payments_by_patient(p_patient_id IN NUMBER
+                               ,p_dat_from   IN DATE
+                               ,p_dat_to     IN DATE
+                               ,p_start      IN NUMBER
+                               ,p_end        IN NUMBER
+                               ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+    l_result   CLOB;
+    l_columns  VARCHAR2(1000);
+    l_dat_from VARCHAR2(15) := to_char(p_dat_from, 'dd.mm.yyyy');
+    l_dat_to   VARCHAR2(15) := to_char(p_dat_to, 'dd.mm.yyyy');
+  BEGIN
+    -- format_date_front
+    -- 'dd.mm.yyyy hh24:mi'
+    /*IF p_start IS NULL
+       OR p_end IS NULL THEN
+    OPEN p_rc FOR
+      WITH t_pay AS(
+      SELECT COUNT(*) AS qty
+            ,clob_agg(table_clob_list(nvl(sd.webtext, sd.text) || '@!@' ||
+                                      fn_get_doc_spec_by_docdepid(pay.docdepid)|| '@!@' ||
+                                      nvl(fn_get_doc_sname_by_id(pay.docdepid), 'Не указан') || '@!@' ||
+                                      to_char(ps.dat, pkg_global.get_constant_value('format_date_front')) || '@!@' ||
+                                      pay.amount, '#!#', 0, sd.webtext)) AS pay_info
+            ,pr.payment_totalid AS pr_ptkeyid
+            ,pay.payment_totalid AS pt_keyid
+        FROM payserv pay
+        JOIN patserv ps ON ps.payservid = pay.keyid
+        JOIN srvdep sd ON ps.srvdepid = sd.keyid
+        LEFT JOIN payserv_return pr ON pr.payservid = pay.keyid
+       WHERE pay.patientid = p_patient_id
+      --   AND pay.payment_totalid = 27887963
+         GROUP BY pr.payment_totalid, pay.payment_totalid
+      )
+      SELECT 'IMG_PT_NAL' AS img_pt \*Картинка платежа*\
+            ,t.pay_type AS pay_type \*типа платежа*\
+            ,p_pay.is_pay_type_in_group(t.pay_type_code, 'PAID', 'ALL') paystatus \* Статус оплаченности: 1 - оплачен, 0 - не оплачен *\
+--            ,t.dat AS pt_dat \*Дата платежа*\
+            ,to_char(t.dat, format_date_front) AS pt_dat_str \*Дата платежа*\
+            ,t.amount AS all_amount \*всего к оплате*\
+            ,t.nal_amount AS pay_nal \*оплачено за нал*\
+            ,t.amount - t.nal_amount AS pay_card \*оплата по карте*\
+            ,t.from_avans_amount AS pay_from_avans \*оплата в счет аванса*\
+            ,'' \*l.text*\ AS lpu_name \*юридическое лицо*\
+            ,t.paymentkeyid AS pt_keyid \*ссылка на сам платеж*\
+            ,t.patkeyid
+            ,(SELECT wpp.confirmation_url
+                FROM inetuser.ws_pay_payment wpp
+                    ,inetuser.ws_pay_order   po
+               WHERE po.payment_total_id = t.paymentkeyid
+                 AND wpp.order_id = po.id
+                 AND wpp.paid_status = 0
+                 AND NOT EXISTS(SELECT NULL FROM inetuser.ws_pay_payment pp WHERE pp.order_id = po.id AND pp.paid_status = 1)
+                 AND nvl(wpp.status, 'canceled') NOT IN ('canceled', 'expired')) AS confirmation_url
+            ,(SELECT qty FROM t_pay tp WHERE t.paymentkeyid IN (tp.pr_ptkeyid, tp.pt_keyid)) srv_qty
+            ,(SELECT pay_info FROM t_pay tp WHERE t.paymentkeyid IN (tp.pr_ptkeyid, tp.pt_keyid)) srv_info
+        FROM v_payment_total t
+       WHERE t.patkeyid = p_patient_id
+         AND EXISTS(SELECT NULL FROM t_pay tp WHERE t.paymentkeyid IN (tp.pr_ptkeyid, tp.pt_keyid))
+         AND trunc(t.dat) BETWEEN p_dat_from AND p_dat_to
+       ORDER BY t.dat DESC;
+    ELSE
+      OPEN p_rc FOR
+      WITH t_pay AS(
+      SELECT COUNT(*) AS qty
+            ,clob_agg(table_clob_list(nvl(sd.webtext, sd.text) || '@!@' ||
+                                      replace(fn_get_doc_spec_by_docdepid(pay.docdepid)|| ' (' || nvl(fn_get_doc_sname_by_id(pay.docdepid), '') || ')', ' ()') || '@!@' ||
+                                      to_char(ps.dat, pkg_global.get_constant_value('format_date_front')) || '@!@' ||
+                                      pay.amount, '#!#', 0, sd.text)) AS pay_info
+            ,pr.payment_totalid AS pr_ptkeyid
+            ,pay.payment_totalid AS pt_keyid
+        FROM payserv pay
+        JOIN patserv ps ON ps.payservid = pay.keyid
+        JOIN srvdep sd ON ps.srvdepid = sd.keyid
+        LEFT JOIN payserv_return pr ON pr.payservid = pay.keyid
+       WHERE pay.patientid = p_patient_id
+      --   AND pay.payment_totalid = 27887963
+         GROUP BY pr.payment_totalid, pay.payment_totalid
+      )
+        SELECT *
+          FROM (SELECT a.*
+                      ,rownum AS rnum
+                  FROM (SELECT 'IMG_PT_NAL' AS img_pt \*Картинка платежа*\
+            ,t.pay_type AS pay_type \*типа платежа*\
+            ,p_pay.is_pay_type_in_group(t.pay_type_code, 'PAID', 'ALL') paystatus \* Статус оплаченности: 1 - оплачен, 0 - не оплачен *\
+            ,to_char(t.dat, format_date_front) AS pt_dat_str \*Дата платежа*\
+            ,t.amount AS all_amount \*всего к оплате*\
+            ,t.nal_amount AS pay_nal \*оплачено за нал*\
+            ,t.amount - t.nal_amount AS pay_card \*оплата по карте*\
+            ,t.from_avans_amount AS pay_from_avans \*оплата в счет аванса*\
+            ,'' \*l.text*\ AS lpu_name \*юридическое лицо*\
+            ,t.paymentkeyid AS pt_keyid \*ссылка на сам платеж*\
+            ,t.patkeyid
+            ,(SELECT wpp.confirmation_url
+                FROM inetuser.ws_pay_payment wpp
+                    ,inetuser.ws_pay_order   po
+               WHERE po.payment_total_id = t.paymentkeyid
+                 AND wpp.order_id = po.id
+                 AND wpp.paid_status = 0
+                 AND NOT EXISTS(SELECT NULL FROM inetuser.ws_pay_payment pp WHERE pp.order_id = po.id AND pp.paid_status = 1)
+                 AND nvl(wpp.status, 'canceled') NOT IN ('canceled', 'expired')) AS confirmation_url
+            ,(SELECT qty FROM t_pay tp WHERE t.paymentkeyid IN (tp.pr_ptkeyid, tp.pt_keyid)) srv_qty
+            ,(SELECT pay_info FROM t_pay tp WHERE t.paymentkeyid IN (tp.pr_ptkeyid, tp.pt_keyid)) srv_info
+        FROM v_payment_total t
+       WHERE t.patkeyid = p_patient_id
+         AND EXISTS(SELECT NULL FROM t_pay tp WHERE t.paymentkeyid IN (tp.pr_ptkeyid, tp.pt_keyid))
+         AND trunc(t.dat) BETWEEN p_dat_from AND p_dat_to
+       ORDER BY t.dat DESC
+       ) a
+                 WHERE rownum <= p_end)
+         WHERE rnum >= p_start;
+    END IF;*/
+    l_result := '
+    WITH t_pay AS(
+      SELECT COUNT(*) AS qty
+            ,clob_agg(table_clob_list(nvl(sd.webtext, sd.text) || ''@!@'' ||
+                                      dd.docid || ''@!@'' ||
+                                      fn_get_doc_sname_by_id(ps.docid_exec) || ''@!@'' ||
+                                      fn_get_lu_name(dd.specid) || ''@!@'' ||
+                                      to_char(ps.dat, pkg_global.get_constant_value(''format_date_front'')) || ''@!@'' ||
+                                      pay.amount
+                                    , ''#!#'', 0, sd.text)) AS pay_info
+            ,pr.payment_totalid AS pr_ptkeyid
+            ,pay.payment_totalid AS pt_keyid
+        FROM payserv pay
+        JOIN patserv ps ON ps.payservid = pay.keyid
+        JOIN srvdep sd ON ps.srvdepid = sd.keyid
+        LEFT JOIN payserv_return pr ON pr.payservid = pay.keyid
+        LEFT JOIN docdep dd ON dd.keyid = ps.docid_exec
+       WHERE pay.patientid = ' || p_patient_id || '
+         GROUP BY pr.payment_totalid, pay.payment_totalid
+      )';
+      IF p_start IS NULL THEN
+        l_columns := '
+      SELECT COUNT(*) from(';
+      ELSE
+        l_columns := '
+      SELECT *
+          FROM (';
+      END IF;
+      l_result := l_result || l_columns || '
+      SELECT a.*
+                      ,rownum AS rnum
+                  FROM (
+      SELECT ''IMG_PT_NAL'' AS img_pt /*Картинка платежа*/
+            ,t.pay_type AS pay_type /*типа платежа*/
+            ,p_pay.is_pay_type_in_group(t.pay_type_code, ''PAID'', ''ALL'') paystatus /* Статус оплаченности: 1 - оплачен, 0 - не оплачен */
+            ,to_char(t.dat, ''dd.mm.yyyy hh24:mi'') AS pt_dat_str /*Дата платежа*/
+            ,t.amount AS all_amount /*всего к оплате*/
+            ,t.nal_amount AS pay_nal /*оплачено за нал*/
+            ,t.amount - t.nal_amount AS pay_card /*оплата по карте*/
+            ,t.from_avans_amount AS pay_from_avans /*оплата в счет аванса*/
+            ,'''' /*l.text*/ AS lpu_name /*юридическое лицо*/
+            ,t.paymentkeyid AS pt_keyid /*ссылка на сам платеж*/
+            ,t.patkeyid
+            ,(SELECT max(wpp.confirmation_url)
+                FROM inetuser.ws_pay_payment wpp
+                    ,inetuser.ws_pay_order   po
+               WHERE po.payment_total_id = t.paymentkeyid
+                 AND wpp.order_id = po.id
+                 AND wpp.paid_status = 0
+                 AND NOT EXISTS(SELECT NULL FROM inetuser.ws_pay_payment pp WHERE pp.order_id = po.id AND pp.paid_status = 1)
+                 AND nvl(wpp.status, ''canceled'') NOT IN (''canceled'', ''expired'')) AS confirmation_url
+            ,(SELECT qty FROM t_pay tp WHERE t.paymentkeyid IN (tp.pr_ptkeyid, tp.pt_keyid)) srv_qty
+            ,(SELECT pay_info FROM t_pay tp WHERE t.paymentkeyid IN (tp.pr_ptkeyid, tp.pt_keyid)) srv_info
+            ,(select max(ffd.ffd_url)
+                from inetuser.ws_pay_order po
+                   , inetuser.ws_pay_payment_ffd ffd
+                where po.payment_total_id = t.paymentkeyid
+                and ffd.order_id = po.id
+                and ffd.ffd_url is not null) AS ffd_url
+        FROM v_payment_total t
+       WHERE t.patkeyid = ' || p_patient_id || '
+         AND EXISTS(SELECT NULL FROM t_pay tp WHERE t.paymentkeyid IN (tp.pr_ptkeyid, tp.pt_keyid))
+         AND trunc(t.dat) BETWEEN to_date(''' || l_dat_from || ''', ''dd.mm.yyyy'') AND to_date(''' || l_dat_to || ''', ''dd.mm.yyyy'')
+       ORDER BY t.dat DESC
+       ) a' || CASE WHEN p_end IS NOT NULL
+                     THEN '
+                 WHERE rownum <= ' || p_end
+                 END || ')' ||
+         CASE WHEN p_start IS NOT NULL
+              THEN '
+         WHERE rnum >= ' || p_start
+          END;
+     dbms_output.put_line(l_result);
+     OPEN p_rc FOR l_result;
+
+  END payments_by_patient;
+
+ /*
+  * Получение количества платежей услуг по пациенту
+  *p_patient_id - ссылка на пациента
+  **/
+  PROCEDURE payments_by_patient_size(p_patient_id IN NUMBER
+                               ,p_dat_from   IN DATE
+                               ,p_dat_to     IN DATE
+                               ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  l_qty NUMBER;
+  BEGIN
+    /*OPEN p_rc FOR
+      SELECT count(*) AS "size"
+        FROM v_payment_total t
+       WHERE t.patkeyid = p_patient_id
+         AND trunc(t.dat) BETWEEN p_dat_from AND p_dat_to;*/
+    payments_by_patient(p_patient_id => p_patient_id,
+                                        p_dat_from   => p_dat_from,
+                                        p_dat_to     => p_dat_to,
+                                        p_start      => NULL,
+                                        p_end        => NULL,
+                                        p_rc         => p_rc);
+    FETCH p_rc
+      INTO l_qty;
+    OPEN p_rc FOR
+      SELECT l_qty AS "size"
+        FROM dual;
+  END payments_by_patient_size;
+  
+  /**
+  * Создание платежа в зависимости от типа.
+  * Для штатной работы должны быть заполнены параметр 50 и 16150
+  */
+
+  PROCEDURE payment_temp(p_patientid      IN NUMBER
+                        ,p_payment_lu_tag IN NUMBER /*тип платежа (LU.TAG=24). Он же и тип и способ оплаты. Code 22 - Аванс Карта,Code 23-Расчет карта*/
+                        ,p_amount         IN NUMBER
+                         /*,p_payment_dat    IN DATE DEFAULT SYSDATE*/
+                        ,p_email  IN VARCHAR2
+                        ,p_phone  IN VARCHAR2
+                        ,p_police IN NUMBER
+                         /*,p_return_url     IN VARCHAR2*/
+                        ,p_rc IN OUT pkg_global.ref_cursor_type) AS
+    l_result_rec             pkg_global.result_rtype;
+    l_agr_id                 NUMBER;
+    l_srvdep_id              NUMBER;
+    l_payment_total_avans_id pkg_global.result_rtype;
+    l_ws_pay_order_id        pkg_global.result_rtype;
+    l_payserv_id             pkg_global.result_rtype;
+
+    p_rc_order              pkg_global.ref_cursor_type;
+    p_rc_avans              pkg_global.ref_cursor_type;
+    p_rc_real_payment_total pkg_global.ref_cursor_type;
+
+    p_return_url VARCHAR2(400);
+
+  BEGIN
+    IF p_email IS NULL
+       AND p_phone IS NULL THEN
+      l_result_rec.error_code := pkg_global.err_crit;
+      l_result_rec.error_text := 'Заполните номер телефона или почту!';
+    END IF;
+
+    IF l_result_rec.error_code <> pkg_global.err_crit THEN
+      --Параметр адреса возврата
+      p_return_url := p_admin.fn_get_param_value_text('WEB_LK_YANDEX_RETURN_URL');
+
+      IF p_payment_lu_tag = 22 THEN
+        /*создание авансового платежа*/
+        payment_temp_avans(p_patientid, p_amount, SYSDATE, p_rc_avans);
+        FETCH p_rc_avans
+          INTO l_payment_total_avans_id;
+        /*получение идентификатора от платежной системы*/
+        pkg_ws_pay.add_order_by_payment_total(l_payment_total_avans_id.identity
+                                             ,fn_get_only_numbers(p_phone)
+                                             ,p_email
+                                             ,p_return_url
+                                             ,1
+                                             ,p_rc_order);
+
+        FETCH p_rc_order
+          INTO l_ws_pay_order_id;
+
+        l_result_rec.identity := l_ws_pay_order_id.identity;
+      END IF;
+    END IF;
+    pkg_global.fill_result_cursor(l_result_rec, p_rc);
+  END;
+  
+  /**
+  * Оплата Аванса.
+  * Для штатной работы должны быть заполнены параметр 50 и 16150
+  */
+  PROCEDURE payment_temp_avans(p_patientid   IN NUMBER
+                              ,p_amount      IN NUMBER
+                              ,p_payment_dat IN DATE DEFAULT SYSDATE
+                              ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+    l_result_rec           pkg_global.result_rtype;
+    l_agr_id               NUMBER;
+    l_srvdep_id            NUMBER;
+    l_payment_total_tmp_id pkg_global.result_rtype;
+    l_payment_total_new_id pkg_global.result_rtype;
+    l_payserv_id           pkg_global.result_rtype;
+
+    p_rc_tmp                pkg_global.ref_cursor_type;
+    p_rc_tmp_payserv        pkg_global.ref_cursor_type;
+    p_rc_real_payment_total pkg_global.ref_cursor_type;
+  BEGIN
+    /*определяем шифр по умолчанию*/
+    l_agr_id := p_admin.fn_get_param_value_linkid('50');
+    /*определяем аванас по умолчанию*/
+    SELECT sd.keyid
+      INTO l_srvdep_id
+      FROM srvdep sd
+     WHERE TRIM(sd.code) = TRIM(p_admin.fn_get_param_value_text('16150'))
+       AND sd.status = 1
+       AND rownum = 1;
+    /*формируем временный платеж*/
+    p_pay_2.save_tmp_payment_total( /*p_payment_total_id    =>*/'-1'
+                                  , /*p_deleted_payserv_ids => */''
+                                  , /*p_patient_id          =>*/p_patientid
+                                  , /*p_agrid               =>*/l_agr_id
+                                  , /*p_police_id           => */NULL
+                                  , /*p_type_code           => */22
+                                  , /*p_link_tag            =>*/NULL
+                                  , /*p_link_id             => */NULL
+                                  , /*p_pay_oday_id         => */NULL
+                                  , /*p_bring_persid        => */NULL
+                                  , /*p_customer_id         => */NULL
+                                  , /*p_dep_id              => */NULL
+                                  , /*p_check_code          => */NULL
+                                  , /*p_text                => */'Онлайн пополнение Аванса из ЛК'
+                                  , /*p_transfer_type_id    => */NULL
+                                  ,p_rc_tmp);
+
+    /*формирование услуги*/
+    FETCH p_rc_tmp
+      INTO l_payment_total_tmp_id;
+    p_pay_2.payserv_save(p_patient_id       => p_patientid
+                        ,p_payment_total_id => l_payment_total_tmp_id.identity
+                        ,p_srvdep_id        => l_srvdep_id
+                        ,p_price            => 1
+                        ,p_amount           => p_amount
+                        ,p_discount         => 0
+                        ,p_qty              => p_amount
+                        ,p_perc             => 1
+                        ,p_dat              => p_payment_dat
+                        ,p_agr_id           => l_agr_id
+                        ,p_cito_stat        => 0
+                        ,p_dat_end          => p_payment_dat
+                        ,p_price_lu_id      => 0
+                        ,p_rc               => p_rc_tmp_payserv);
+
+    FETCH p_rc_tmp_payserv
+      INTO l_payserv_id;
+    /*формирование реального платежа из временного*/
+    p_pay_2.create_payment_total_from_tmp(
+                                          /*p_tmp_payment_total_id =>*/l_payment_total_tmp_id.identity
+                                         ,
+                                          /*p_paytype_code         => */NULL
+                                         ,
+                                          /*p_pay_oday_id          => */NULL
+                                         ,
+                                          /*p_lpu_id               => */NULL
+                                         ,
+                                          /*p_is_moneyback         => */0
+                                         ,
+                                          /*p_summ_total           => */p_amount
+                                         ,
+                                          /*p_summ_nal             => */0
+                                         ,
+                                          /*p_summ_card            => */p_amount
+                                         ,
+                                          /*p_summ_sbp             => */0,0
+--                                         ,
+--                                          /*p_summ_avans           => */0
+                                         ,
+                                          /*p_summ_debt            => */0
+                                         ,
+                                          /*p_list_payserv_ids     => */l_payserv_id.identity
+                                         ,
+                                          /*p_list_payserv_qtys    => */p_amount
+                                         ,
+                                          /*p_is_single_payment    => */1
+                                         ,
+                                          /*p_serv_check_code      => */NULL
+                                         ,p_rc_real_payment_total);
+
+    /*финализация*/
+    FETCH p_rc_real_payment_total
+      INTO l_payment_total_new_id;
+    p_pay_2.payment_total_finalize( /*p_tmp_payment_total_id  => */l_payment_total_tmp_id.identity
+                                  ,
+                                   /*p_new_payment_total_ids => */l_payment_total_new_id.identity
+                                  ,
+                                   /* p_is_single_payment     => */1
+                                  ,p_rc);
+    UPDATE payment_total pt
+       SET luid =
+           (SELECT lu.keyid
+              FROM lu
+             WHERE tag = 24
+               AND code = 12)
+     WHERE pt.keyid = l_payment_total_new_id.identity;
+    /*помещаем данные в курсор для дальнейшей обработки*/
+    l_result_rec.identity := l_payment_total_new_id.identity;
+    pkg_global.fill_result_cursor(l_result_rec, p_rc);
+
+  EXCEPTION
+    WHEN OTHERS THEN
+      l_result_rec.error_code := pkg_global.err_crit;
+      l_result_rec.error_text := 'Ошибка при финализации ОНЛАЙН оплаты.';
+      solution_log.p_log.err(p_err_text   => l_result_rec.error_text
+                            ,p_err_type   => l_result_rec.error_code
+                            ,p_err_code   => 'P_PAY_2.PAYMENT_TOTAL_FINALIZE'
+                            ,p_link_tag   => solution_root.pkg_global.gc_tag_med_payment_total
+                            ,p_link_id    => l_payment_total_new_id.identity
+                            ,p_patient_id => p_patientid);
+      pkg_global.fill_result_cursor(l_result_rec, p_rc);
+
+  END payment_temp_avans;
+
+
+  /**
+  * Получение баланса по пациенту
+  */
+  PROCEDURE get_balans_by_patient(p_patientid  IN NUMBER
+                                   ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+      OPEN p_rc FOR
+    SELECT sum(pt.amount - nvl(pt.usedamount, 0)) AS amount
+      FROM payment_total pt
+      JOIN lu l
+        ON pt.luid = l.keyid
+     WHERE p_pay.is_pay_type_in_group(l.code, 'PAID', 'ADVANCE') = 1
+       AND pt.patientid = p_patientid
+       AND nvl(pt.rootid, 0) = 0
+       AND nvl(pt.status, 0) = 0
+       AND nvl(pt.usedamount, 0) < pt.amount
+     ORDER BY pt.dat;
+  END get_balans_by_patient;
+  
+/* Получить URL для оплаты */
+  PROCEDURE get_payment_url(p_order_id IN inetuser.ws_pay_order.id%TYPE -- [число], идентификатор заказа в МИС
+                           ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      select po.confirmation_url as confirmationurl
+      FROM inetuser.ws_pay_payment po
+      where po.order_id = p_order_id;
+  END get_payment_url;
+  
+/* Получить почту по заказу */
+  PROCEDURE get_email_from_order(p_order_id IN inetuser.ws_pay_order.id%TYPE -- [число], идентификатор заказа в МИС
+                           ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      select p.note as email, p.phone, pay_params_email_def as emailClinic
+      from v_payment_total vpt, patient p
+      where p.keyid = vpt.patkeyid
+      and vpt.paymentkeyid = (select max(po.payment_total_id) from inetuser.ws_pay_order po where po.id = p_order_id);
+  END get_email_from_order;
+  
 
 END pkg_web_account_unique_7;
