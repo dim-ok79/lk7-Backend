@@ -108,6 +108,12 @@ app.use('/img/spec', express.static('static/spec')); // для фотки спе
 app.use('/img/doc', express.static('static/doc')); // для фотки докторов (http://10.0.0.204:2018/photo/user1.jpg)
 app.use('/js', express.static('static/js')); // для js
 
-// console.log('app=', app);
+// Обработка 404 ошибки для всех остальных URL
+app.use((req, res, next) => {
+    res.status(404).json({
+        error: 'Ignore API'
+    });
+});
+
 module.exports = app;
 
