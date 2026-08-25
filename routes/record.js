@@ -11,6 +11,8 @@ const sql_set_numb_blstatus = "BEGIN "+cfg.db.packageName+".set_numb_blstatus(:p
 const sql_patient_appointment = "BEGIN "+cfg.db.packageName+".patient_appointment(:p_patient_id, :p_rnumb_id, :p_srv_id , :cursor); END;";
 const sql_rnumb_attrs = "BEGIN "+cfg.db.packageName+".rnumb_attrs(:p_rnumb_id, :p_srv_ids, :cursor); END;";
 
+const sql_create_payment_by_rnumb = "BEGIN "+cfg.db.packageName+".create_payment_by_rnumb(:p_patient_id, :p_rnumb_id, :p_srv_ids, :cursor); END;";
+
 const sql_cancel_appointment = "BEGIN "+cfg.db.packageName+".cancel_appointment(:p_patient_id, :p_rnumb_id, :cursor); END;";
 const sql_get_serv_list_by_rnumb = "BEGIN "+cfg.db.packageName+".get_serv_list_by_rnumb(:p_rnumb_id, :cursor); END;";
 const sql_set_numb_unlock_status = "BEGIN "+cfg.db.packageName+".set_numb_unlock_status(:p_rnumb_id, :cursor); END;";
@@ -263,5 +265,43 @@ app.get("/record/rnumb/serv", global.acsToken, function(req,res) {
         res.json(format.getFormatRes(false, null, 'Not params'));
     }
 });
+
+/**
+ * @api {get} /record/rnumb/cpbyr 9) Создание платежа после записи на номерок (TOKEN)
+ * @apiGroup record
+ * @apiVersion 0.0.1
+ *
+ * @apiHeader {String} Authorization Authorization: TOKEN AUTH_TOKEN *
+ * @apiParam {Number} rnumbID  ID талона
+ * @apiParam {Number} [srvID]  ID услуги
+ *
+ *
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *  {
+ *   }
+ *
+ */
+
+app.get("/record/rnumb/cpbyr", global.acsToken, function(req,res) {
+    let user = global.getAuthUser(req);
+    if (req.query.rnumbID) {
+        let params = {p_patient_id: user.patient_id, p_rnumb_id: req.query.rnumbID, p_srv_ids: null};
+        if (req.query.srvID) {
+            params.p_srv_ids = req.query.srvID;
+        }
+        execute.executeRes(sql_create_payment_by_rnumb, params)
+            .then(result => {
+                const tmp = format.assocArrayFromJSON(result);
+                res.json(format.getFormatRes(true, tmp[0], null));
+            })
+            .catch(err => {
+                res.json(format.getFormatRes(false, null, err));
+            });
+    } else {
+        res.json(format.getFormatRes(false, null, 'Not params'));
+    }
+});
+
 
 module.exports = app;

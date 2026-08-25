@@ -21,22 +21,30 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
 
   Если процедура/функция отсутствует в уникальном пакете - используется стандартная.
   */
-  
+    /* кол-во минут, через которое удаляется платеж с услугами
+  и освобождается номерок, если нет оплаты (с учетом конечного статуса) */
+  g_countmins NUMBER := nvl(p_admin.fn_get_param_value_number('506756'), 60);
+
   /* Для оповещений по email*/
+  -- Ссылка на VK
+  c_email_url_vk CONSTANT VARCHAR2(1000) := pkg_global.get_constant_value('p_web_account_unique.c_EMAIL_URL_VK');
+  -- Ссылка на YouTube
+  c_email_url_youtube CONSTANT VARCHAR2(1000) := pkg_global.get_constant_value('p_web_account_unique.c_EMAIL_URL_YOUTUBE');
+
   -- логотип МО
   c_email_url_logo CONSTANT VARCHAR2(1000) := pkg_global.get_constant_value('p_web_account_unique.c_EMAIL_URL_LOGO');
   -- Номер телефона
   c_email_phone CONSTANT VARCHAR2(1000) := pkg_global.get_constant_value('p_web_account_unique.c_EMAIL_PHONE');
   -- Доп. инфо (слева снизу)
   c_email_info CONSTANT VARCHAR2(1000) := pkg_global.get_constant_value('p_web_account_unique.c_EMAIL_INFO');
-  
+
     -- формат даты, для FRONT
   format_date_front CONSTANT VARCHAR2(100) := 'dd.mm.yyyy hh24:mi';
   -- формат даты, для параметров  входящих
   format_date_in CONSTANT VARCHAR2(1000) := 'yyyy-mm-dd';--'YYYY-MM-DD';
-  
+
   applic_name CONSTANT VARCHAR2(100) := 'pa_web_account';
-  
+
   /*количество дней для отображения вперед от текущей даты*/
   c_param_506721 CONSTANT NUMBER := greatest(nvl(p_admin.fn_get_param_value_number('506721'), 0), 0);
   /*Номерки в самозаписи и личном кабинете. Учитывать пол и возраст для фильтрации врачей*/
@@ -46,17 +54,26 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
   -- 0 - отображать номерки без отметок из справочника lu.29
   -- коды из lu.29, указываются через запятую
   c_param_506750 CONSTANT VARCHAR2(1000) := p_admin.fn_get_param_value_text('506750');
-  
+
+  /*Код фиктивной услуги для записи без выбора услуг */
+  c_param_506748 CONSTANT NUMBER := p_admin.fn_get_param_value_text('506748');
+
   -- Метки для обычного    (0)
   label_code_old CONSTANT VARCHAR2(100) :='924, 936, 940, 941, 943'; -- Убрал децкие , 949
   label_code_kinder CONSTANT VARCHAR2(100) :='949';
   -- Для видео конференции (1)
   label_code_true_conf CONSTANT VARCHAR2(100) :='913';
-  
+
+  --18-04-25 Метка ЛК Платный
+  label_is_online_pay CONSTANT VARCHAR2(100) :='90716140';
+
+  --29-05-26 Метка TRUECONF
+  label_true_conf CONSTANT VARCHAR2(100) :='90714825';
+
 -- Почта для платежей, пациент без почты
   pay_params_email_def VARCHAR2(100) := 'cheque@med122.ru';
-  
-  
+
+
   TYPE r_docdep IS RECORD(
      doctorid doctor.keyid%TYPE
     ,docdepid docdep.keyid%TYPE
@@ -84,22 +101,22 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
     ,stacid      NUMBER);
 
   TYPE t_rnumb IS TABLE OF r_rnumb;
-  
-  
+
+
   /**
   * Установка идентификатора пользователя в контекст соединения
   */
   PROCEDURE set_context_userid;
-  
+
   FUNCTION get_template_html(p_code IN VARCHAR2) RETURN CLOB;
-  
+
   /**
   * Получение значения параметра
   * Параметры: p_code - код или номер параметра
   **/
   PROCEDURE get_param(p_code IN VARCHAR2
                      ,p_rc   IN OUT pkg_global.ref_cursor_type);
-                     
+
   /**
    * Запись логов событий пациентов
    *
@@ -114,7 +131,7 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
                       ,p_success    IN NUMBER
                       ,p_url        IN VARCHAR2
                       ,p_rc         IN OUT pkg_global.ref_cursor_type);
-  
+
   /**
   * Авторизация пользователя
   * Параметры: p_login - логин
@@ -149,18 +166,18 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
   */
   PROCEDURE get_patient_ext(p_patient_id     IN NUMBER
                            ,p_rc             IN OUT pkg_global.ref_cursor_type);
-                           
+
 /* Получить название ЛПУ */
   FUNCTION fn_get_name_lpu(p_id      IN NUMBER) RETURN VARCHAR2;
-/* Получить адрес ЛПУ */  
+/* Получить адрес ЛПУ */
   FUNCTION fn_get_addres_lpu(p_id      IN NUMBER) RETURN VARCHAR2;
   FUNCTION fn_get_orderby_lpu(p_id      IN NUMBER) RETURN NUMBER;
-                           
+
   /**
   * Получить список подразделений
   */
   PROCEDURE get_lpu_list(p_patient_id  IN NUMBER, p_rc       IN OUT pkg_global.ref_cursor_type);
-                  
+
   /* Получение списка подписанных договоров по пациенту */
   PROCEDURE contract_get_list_by_patient(p_patient_id IN NUMBER
                                         ,p_rc         IN OUT pkg_global.ref_cursor_type);
@@ -210,7 +227,7 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
                                    ,p_begin_date IN DATE
                                    ,p_end_date  IN DATE
                                    ,p_rc         IN OUT pkg_global.ref_cursor_type);
-                                   
+
   /**
   * Получение Количества событий истории пациента
   * Параметры: p_patient_id - идентификатор пациента
@@ -237,10 +254,10 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
                           ,p_start IN NUMBER
                           ,p_end   IN NUMBER
                           ,p_rc    IN OUT pkg_global.ref_cursor_type);
-                                   
+
   /*Получение id структуры по по id отделения */
   FUNCTION get_dep_root_id_by_dep_id(p_dep_id IN dep.keyid%TYPE) RETURN NUMBER;
-           
+
 /*
 * Получить докторов по ЛПУ
 */
@@ -251,7 +268,7 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
                        ,p_patient_id   IN NUMBER
                        ,p_lpu_id      IN NUMBER DEFAULT NULL) RETURN t_docdep
     PIPELINED;
-  
+
 
   /**
   * Список доступных номерков
@@ -265,7 +282,7 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
                       ,p_rectype    IN NUMBER
                       ,p_patient_id IN NUMBER) RETURN t_rnumb
     PIPELINED;
-    
+
   /**
   * Список талонов пациента
   *
@@ -287,7 +304,7 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
   */
   PROCEDURE get_rnumb_info(p_rnumb_id IN NUMBER
                           ,p_rc       IN OUT pkg_global.ref_cursor_type);
-    
+
 
   /**
   * Получение списка платежей услуг по пациенту
@@ -345,5 +362,204 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
 /* Получить почту по заказу */
   PROCEDURE get_email_from_order(p_order_id IN inetuser.ws_pay_order.id%TYPE -- [число], идентификатор заказа в МИС
                            ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Список специальностей
+  * Параметры:
+    p_dat_from - Дата начала периода
+    p_dat_to   - Дата окончания периода
+    p_stac_id  - спец.отметки из фильтра
+    p_lpu_id - id ЛПУ
+  **/
+  PROCEDURE get_spec_list(p_dat_from IN DATE
+                         ,p_dat_to   IN DATE
+                         ,p_lpu_id  IN NUMBER
+                         ,p_stac_id  IN NUMBER
+                         ,p_rectype  IN NUMBER
+                         ,p_patient_id IN NUMBER
+                         ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  PROCEDURE frame2_get_spec_list( p_rc IN OUT pkg_global.ref_cursor_type);
+
+/* */
+  /**
+  * Список врачей
+  * Параметры:
+    p_spec_id    - Идентификатор специальности
+    p_dat_from   - Период, начало
+    p_dat_to     - Период, окончание
+  **/
+  PROCEDURE get_doc_list(p_spec_id  IN NUMBER
+                        ,p_dat_from IN DATE
+                        ,p_dat_to   IN DATE
+                        ,p_stac_id  IN NUMBER
+                        ,patient_id IN NUMBER
+                        ,p_lpu_id IN NUMBER
+                        ,p_rectype  IN NUMBER
+                        ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  PROCEDURE frame2_get_doc_list(p_spec_id  IN NUMBER
+                        ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  PROCEDURE frame2_get_doc_list_all(p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Список услуг по врачу
+  * Параметры:
+    p_doctor_id - Идентификатор врача
+    p_spec_id   - Идентификатор специальности
+  **/
+  PROCEDURE get_serv_list(p_doctor_id IN NUMBER
+                         ,p_spec_id   IN NUMBER
+                         ,p_dat_from  IN DATE
+                         ,p_dat_to    IN DATE
+                         ,p_stac_id   IN NUMBER
+                         ,p_rc        IN OUT pkg_global.ref_cursor_type);
+
+  /*
+  * признак обязательности оплаты онлайн
+  */
+  FUNCTION fn_is_online_pay(p_srv_id   IN NUMBER) RETURN NUMBER;
+
+
+  PROCEDURE frame2_get_serv_list(p_doctor_id IN NUMBER
+                                ,p_spec_id   IN NUMBER
+                                ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+
+/* Получить ссылку на врача*/
+  PROCEDURE frame2_get_doc_url(p_doctor_id IN NUMBER
+                         ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+/* Получить список номерков */
+  PROCEDURE frame2_get_rnumb_list(p_doctor_id  IN NUMBER
+                          ,p_spec_id    IN NUMBER
+                          ,p_srv_ids    IN VARCHAR2
+                          ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Список номерков
+  * Параметры:
+    p_doctor_id   - Идентификатор врача
+    p_spec_id     - Идентификатор специальности
+    p_dat_from    - Период, начало
+    p_dat_to      - Период, окончание
+    p_patient_id  - Идентификатор пациента
+  **/
+
+  PROCEDURE get_rnumb_list(p_doctor_id  IN NUMBER
+                          ,p_spec_id    IN NUMBER
+                          ,p_begin_dat  IN VARCHAR2
+                          ,p_end_dat    IN VARCHAR2
+                          ,p_stac_id    IN NUMBER
+                          ,p_patient_id IN NUMBER
+                          ,p_srv_ids    IN VARCHAR2
+                          ,p_lpu_id    IN NUMBER
+                          ,p_rectype    IN NUMBER
+                          ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+
+/* Получить название ЛПУ */
+  FUNCTION fn_get_id_lpu(p_depid IN NUMBER) RETURN NUMBER;
+
+  /**
+  * Отмена записи пациента
+  *
+  * @param int p_patient_id - Идентификатор пациента
+  * @param int p_rnumb_id - Идентификатор талона
+  * @returns:
+  * int Код ошибки
+  * varchar2 Текст ошибки
+  */
+  PROCEDURE cancel_appointment(p_patient_id IN NUMBER
+                              ,p_rnumb_id   IN NUMBER
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Блокировка талона
+  *
+  * @param int p_rnumb_id - идентификатор талона
+  * @returns:
+  * int Код ошибки
+  * varchar2 Текст ошибки
+  */
+  PROCEDURE set_numb_blstatus(p_rnumb_id   IN NUMBER
+                             ,p_patient_id IN NUMBER
+                             ,p_rc         IN OUT pkg_global.ref_cursor_type);
+  /**
+  * РАЗБлокировка талона
+  *
+  * @param int p_rnumb_id - идентификатор талона
+  * @returns:
+  * int Код ошибки
+  * varchar2 Текст ошибки
+  */
+  PROCEDURE set_numb_unlock_status(p_rnumb_id IN NUMBER
+                                  ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Запись пациента на талон
+  *
+  * p_patient_id - Идентификатор пациента
+  * p_rnumb_id - Идентификатор талона
+  * p_srv_ids = Идентификаторы услуг
+  * @returns:
+  * int Код ошибки
+  * varchar2 Текст ошибки
+  */
+  PROCEDURE patient_appointment(p_patient_id IN NUMBER
+                               ,p_rnumb_id   IN NUMBER
+                               ,p_srv_ids    IN VARCHAR2
+                               ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * атрибуты номерка, запускается после записи на прием
+  *
+  * p_rnumb_id - Идентификатор талона
+  * p_srv_ids = Идентификаторы услуг
+  * @returns:
+  * int is_online_pay        - 0 - можно оплатить онлайн и в ЛПУ, 1 - обязательная оплата онлайн, null - нет выбора онлайн-оплаты
+  * int is_telemed           - 0 - обычный номерок, 1 - телеконференция
+  * int is_create_srvs       - 0 - не нужно сразу создавать услуги, 1 - нужно сразу создавать услуги на номерке
+  * int is_create_pay_order  - 0 - не нужно сразу создавать заказ для оплаты, 1 - нужно сразу создавать заказ для оплаты
+  */
+  PROCEDURE rnumb_attrs(p_rnumb_id IN NUMBER
+                       ,p_srv_ids  IN VARCHAR2
+                       ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Создание услуг
+  *
+  * p_patient_id - Идентификатор пациента
+  * p_rnumb_id - Идентификатор талона
+  * p_srv_ids = Идентификаторы услуг
+  * @returns:
+  * int Код ошибки
+  * varchar2 Текст ошибки
+  */
+  PROCEDURE create_rnumb_srvs(p_patient_id IN NUMBER
+                             ,p_rnumb_id   IN NUMBER
+                             ,p_srv_ids    IN VARCHAR2
+                             ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Создание платежа после записи на номерок
+  *
+  * p_rnumb_id - Идентификатор талона
+  * @returns:
+  * int Идентификатор платежа
+  */
+  PROCEDURE create_payment_by_rnumb(p_patient_id IN NUMBER
+                                   ,p_rnumb_id   IN NUMBER
+                                   ,p_srv_ids    IN VARCHAR2
+                                   ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Список услуг по номерку
+  * Параметры:
+    p_rnumb_id - Идентификатор врача
+  **/
+  PROCEDURE get_serv_list_by_rnumb(p_rnumb_id IN NUMBER
+                                  ,p_rc       IN OUT pkg_global.ref_cursor_type);
 
 END pkg_web_account_unique_7;

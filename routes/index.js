@@ -102,6 +102,12 @@ app.use(require('./history'));        // Записи пациента
 app.use(require('./rnumb'));          // Номерки пациента
 app.use(require('./record'));         // Запись на номерки
 app.use(require('./payments'));       // Платежи пациента
+try {
+  app.use(require('./payServSber'));    // Платежный сервис Cber
+}
+catch (e) {
+  console.log('E=', e)
+}
 
 
 app.use('/img/spec', express.static('static/spec')); // для фотки специальностей (http://10.0.0.204:2018/photo/user1.jpg)
