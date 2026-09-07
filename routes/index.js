@@ -6,6 +6,9 @@ const loadModuleApp = require("../utils/util");
 
 const app = express();
 const logger = require('../utils/logger')('R-Index');
+const cookieParser = require('cookie-parser');
+
+app.use(cookieParser());
 
 // const c_img = require("../utils/img");
 
@@ -108,6 +111,7 @@ try {
 catch (e) {
   console.log('E=', e)
 }
+app.use(require('./semd'));            // СЭМДы
 
 
 app.use('/img/spec', express.static('static/spec')); // для фотки специальностей (http://10.0.0.204:2018/photo/user1.jpg)

@@ -291,7 +291,7 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
             ,p.note AS email -- e-mail/факс
             ,p.snils   -- снилс ИНН
             ,gsp_get_pat_address(p.keyid, 2) AS address_proj -- Адрес проживания
-            ,gsp_get_pat_address(p.keyid, 1) AS address_proj_f -- Адрес Фактический
+            ,gsp_get_pat_address(p.keyid, 1) AS address_proj_f -- Адрес Фактический 
             ,(SELECT count(PL.ID) FROM inetuser.patient_logon pl
                  WHERE pl.status = 1
                        AND pl.patient_id = p_patient_id
@@ -1004,7 +1004,7 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
     l_end_dat   := to_date(p_end_dat, format_date_in);
 
     OPEN p_rc FOR
-/* */
+/* */   
       SELECT v.keyid
             ,v.typetext
             ,v.typehistory
@@ -1015,7 +1015,7 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
             ,v.sortcode
             ,v.dep_name
             ,v.count_files
-/*
+/*            
             ,CASE
                WHEN EXISTS (SELECT 1
                        FROM docdep dd
@@ -1036,12 +1036,12 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
                 0
              END AS sched_exists_for_dd_on_visit
 */
-, 0 AS sched_exists_for_dd_on_visit
+, 0 AS sched_exists_for_dd_on_visit             
         FROM (SELECT t.*
                     ,rownum AS rnum
                 FROM (SELECT tt.*
                         FROM (
-
+                        
                         SELECT v.keyid AS keyid
                                     ,'Консультация' AS typetext
                                     ,'visit' AS typehistory
@@ -1170,7 +1170,7 @@ and fr.link_id = v.keyid) AS count_files
     RETURN l_result;
 
   END;
-
+  
 /*
 * Получить докторов по ЛПУ
 */
@@ -1217,7 +1217,7 @@ and fr.link_id = v.keyid) AS count_files
            and a3.linkid =(' || p_lpu_id || ')
         ))';
     ELSE
--- Отключаем ВАЛДАЙ
+-- Отключаем ВАЛДАЙ    
         l_cmd_lpu :=' AND dd.keyid NOT IN (select d1.keyid
                                           FROM attr a1, attr a2, attr a3, docdep d1
                                          WHERE a1.rootid = 0
@@ -1239,7 +1239,7 @@ and fr.link_id = v.keyid) AS count_files
            AND a2.keyid = a3.rootid
            and a3.linkid = 3
         ))';
-
+        
     END IF;
 
     IF p_spec_id IS NOT NULL THEN
@@ -1330,7 +1330,7 @@ and fr.link_id = v.keyid) AS count_files
 
     RETURN;
   END;
-
+  
   /**
   * Список доступных номерков
   * Параметры:
@@ -1378,11 +1378,11 @@ and fr.link_id = v.keyid) AS count_files
        IF p_rectype =1 THEN -- Для видео конференции (1)
          l_param_506750 := label_code_true_conf;
        END IF;
-/*03-0832026 - отключил диспансеризацию
+/*03-0832026 - отключил диспансеризацию       
        IF p_rectype =2 THEN -- Для диспансеризации   (2)
          l_param_506750 := label_code_disp;
        END IF;
-*/
+*/       
     END IF;
 
     -- собираем условия запроса
@@ -1438,7 +1438,7 @@ and fr.link_id = v.keyid) AS count_files
 
     RETURN;
   END;
-
+  
   /**
   * Список талонов пациента
   *
@@ -1569,7 +1569,7 @@ and fr.link_id = v.keyid) AS count_files
               ,'Ошибка получения номерков.' AS err_text
           FROM dual;
   END get_rnumbs_by_patient;
-
+  
   PROCEDURE history_diagnostic(p_research_id    IN NUMBER
                               ,p_rc             IN OUT pkg_global.ref_cursor_type) AS
   BEGIN
@@ -1678,7 +1678,7 @@ and fr.link_id = v.keyid) AS count_files
          AND r.keyid = p_rnumb_id;
   END get_rnumb_info;
 
-
+  
   /**
   * Получение списка платежей услуг по пациенту
   *p_patient_id - ссылка на пациента
@@ -1898,7 +1898,7 @@ and fr.link_id = v.keyid) AS count_files
       SELECT l_qty AS "size"
         FROM dual;
   END payments_by_patient_size;
-
+  
   /**
   * Создание платежа в зависимости от типа.
   * Для штатной работы должны быть заполнены параметр 50 и 16150
@@ -1958,7 +1958,7 @@ and fr.link_id = v.keyid) AS count_files
     END IF;
     pkg_global.fill_result_cursor(l_result_rec, p_rc);
   END;
-
+  
   /**
   * Оплата Аванса.
   * Для штатной работы должны быть заполнены параметр 50 и 16150
@@ -2111,7 +2111,7 @@ and fr.link_id = v.keyid) AS count_files
        AND nvl(pt.usedamount, 0) < pt.amount
      ORDER BY pt.dat;
   END get_balans_by_patient;
-
+  
 /* Получить URL для оплаты */
   PROCEDURE get_payment_url(p_order_id IN inetuser.ws_pay_order.id%TYPE -- [число], идентификатор заказа в МИС
                            ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
@@ -2121,7 +2121,7 @@ and fr.link_id = v.keyid) AS count_files
       FROM inetuser.ws_pay_payment po
       where po.order_id = p_order_id;
   END get_payment_url;
-
+  
 /* Получить почту по заказу */
   PROCEDURE get_email_from_order(p_order_id IN inetuser.ws_pay_order.id%TYPE -- [число], идентификатор заказа в МИС
                            ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
@@ -2132,7 +2132,7 @@ and fr.link_id = v.keyid) AS count_files
       where p.keyid = vpt.patkeyid
       and vpt.paymentkeyid = (select max(po.payment_total_id) from inetuser.ws_pay_order po where po.id = p_order_id);
   END get_email_from_order;
-
+  
   /**
   * Список специальностей
   * Параметры:
@@ -2173,7 +2173,7 @@ and fr.link_id = v.keyid) AS count_files
          ORDER BY l.text;
 
   END get_spec_list;
-
+  
   PROCEDURE frame2_get_spec_list( p_rc IN OUT pkg_global.ref_cursor_type) AS
   BEGIN
     get_spec_list(  p_dat_from => SYSDATE,
@@ -2184,7 +2184,7 @@ and fr.link_id = v.keyid) AS count_files
                                               p_patient_id => null, --fn_get_patientid(p_kinder),
                                               p_rc => p_rc);
   END frame2_get_spec_list;
-
+  
   /**
   * Список врачей
   * Параметры:
@@ -2249,7 +2249,7 @@ and fr.link_id = v.keyid) AS count_files
       ORDER BY l_name;
 
   END get_doc_list;
-
+  
   PROCEDURE frame2_get_doc_list(p_spec_id  IN NUMBER
                         ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
   BEGIN
@@ -2263,7 +2263,7 @@ and fr.link_id = v.keyid) AS count_files
                   ,p_rc => p_rc);
 
   END frame2_get_doc_list;
-
+  
   PROCEDURE frame2_get_doc_list_all(p_rc       IN OUT pkg_global.ref_cursor_type) AS
   BEGIN
       OPEN p_rc FOR
@@ -2285,12 +2285,12 @@ and fr.link_id = v.keyid) AS count_files
                                               ,p_stac_id    => null
                                               ,p_patient_id => null -- p_patient_id -- NULL
                                               ,p_rectype => null)) r
-        where r.docdepid = d1.docdepid
-        GROUP BY d1.doctorid, d1.lastname, d1.firstname,d1.secondname, d1.specid
+        where r.docdepid = d1.docdepid                                                
+        GROUP BY d1.doctorid, d1.lastname, d1.firstname,d1.secondname, d1.specid                                                
         order by d1.doctorid;
-
+      
   END frame2_get_doc_list_all;
-
+ 
   /**
   * Список услуг по врачу
   * Параметры:
@@ -2323,7 +2323,7 @@ and fr.link_id = v.keyid) AS count_files
          AND nvl(pkg_attr.fn_is_object_in_attr_group(sd.keyid, 4, 5259, 1), 0) = 1
          order by decode(sd.code, to_char(c_param_506748), 1, 2), text;
   END get_serv_list;
-
+ 
   /*
   * признак обязательности оплаты онлайн
   */
@@ -2374,7 +2374,7 @@ and fr.link_id = v.keyid) AS count_files
                                                 ,p_rc => p_rc);
   END frame2_get_serv_list;
 
-
+  
 /* Получить ссылку на врача*/
   PROCEDURE frame2_get_doc_url(p_doctor_id IN NUMBER
                          ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
@@ -2388,7 +2388,7 @@ and fr.link_id = v.keyid) AS count_files
                                         p_location      => 'REGLPU') AS URL
       from dual;
   END frame2_get_doc_url;
-
+  
 
 /* Получить список номерков */
   PROCEDURE frame2_get_rnumb_list(p_doctor_id  IN NUMBER
@@ -2407,7 +2407,7 @@ and fr.link_id = v.keyid) AS count_files
                                                 ,p_rectype => null --p_rectype
                                                 ,p_rc => p_rc);
   END frame2_get_rnumb_list;
-
+  
   /**
   * Список номерков
   * Параметры:
@@ -2442,7 +2442,7 @@ and fr.link_id = v.keyid) AS count_files
              ,fn_get_id_lpu(d1.depid) as lpu_id
 -- where dd.docid=582
 -- and dd.depid = 2396;
-
+            
             ,r.paystatus
 --            ,decode(r.stacid, label_is_online_pay, 1,0) is_online_pay -- признак платной метки - сверка с меткой
             ,CASE WHEN r.stacid = label_is_online_pay OR r.stacid = label_true_conf THEN 1 ELSE 0 END AS is_online_pay
@@ -2475,7 +2475,7 @@ and fr.link_id = v.keyid) AS count_files
          AND d1.depid = d.keyid
        ORDER BY r.dat;
   END get_rnumb_list;
-
+  
 /* Получить название ЛПУ */
   FUNCTION fn_get_id_lpu(p_depid IN NUMBER) RETURN NUMBER IS
     l_result_value NUMBER;
@@ -2491,17 +2491,17 @@ and fr.link_id = v.keyid) AS count_files
                AND a2.status = 1
                AND a2.keyid = a3.rootid
     AND a2.sortcode = substr(fn_get_dep_sortcode(p_depid), 1, 9);
-
+    
     return l_result_value;
-
+    
     EXCEPTION
 --      WHEN NO_DATA_FOUND THEN
 --      WHEN TOO_MANY_ROWS THEN
-      WHEN OTHERS THEN
+      WHEN OTHERS THEN    
           l_result_value := 0;
           return l_result_value;
-
-/*
+      
+/*    
     CASE (p_id)
     WHEN 1 THEN l_result_value := 'Центральная поликлиника';
     WHEN 3 THEN l_result_value := 'Валдайский многопрофильный медицинский центр';
@@ -2512,10 +2512,10 @@ and fr.link_id = v.keyid) AS count_files
     WHEN 9 THEN l_result_value := 'Поликлиника №6';
     ELSE l_result_value := '';
     END CASE;
-*/
+*/    
   END fn_get_id_lpu;
-
-
+  
+  
   /**
   * Отмена записи пациента
   *
@@ -2941,7 +2941,7 @@ and fr.link_id = v.keyid) AS count_files
               ,'' AS guid
           FROM dual;
   END set_numb_unlock_status;
-
+  
   /**
   * Запись пациента на талон
   *
@@ -3354,7 +3354,7 @@ and fr.link_id = v.keyid) AS count_files
               ,'' AS guid
           FROM dual;
   END patient_appointment;
-
+  
 
   /**
   * атрибуты номерка, запускается после записи на прием
@@ -3418,9 +3418,11 @@ and fr.link_id = v.keyid) AS count_files
         END IF;
 
         -- Если обязательно к онлайн-оплате, то нужно создавать услуги и платеж
-/*        IF l_is_online_pay = 1 THEN
+/* 24-08-26 */
+        IF l_is_online_pay = 1 THEN
           l_is_create_pay_order := 1;
-        END IF;*/
+        END IF;
+/*        */
       END LOOP;
     ELSE
       l_is_online_pay := NULL;
@@ -3442,7 +3444,7 @@ and fr.link_id = v.keyid) AS count_files
               ,l_is_create_pay_order AS is_create_pay_order
           FROM dual;
   END rnumb_attrs;
-
+  
   /**
   * Создание услуг
   *
@@ -3560,7 +3562,7 @@ and fr.link_id = v.keyid) AS count_files
               ,'' AS guid
           FROM dual;
   END create_rnumb_srvs;
-
+  
   /**
   * Создание платежа после записи на номерок
   *
@@ -3745,7 +3747,7 @@ and fr.link_id = v.keyid) AS count_files
               ,NULL                    AS paymentid
           FROM dual;
   END create_payment_by_rnumb;
-
+  
   /**
   * Список услуг по номерку
   * Параметры:
@@ -3765,6 +3767,40 @@ and fr.link_id = v.keyid) AS count_files
        WHERE r.keyid = p_rnumb_id
          AND nvl(ps.visitid, 0) <> 0;
   END get_serv_list_by_rnumb;
+  
+  /**
+  * Список СЭМДов по визиту
+  * Параметры:
+    p_visit_id - Идентификатор Визита
+  **/
+  PROCEDURE get_semd_list_by_visit(p_visit_id IN NUMBER
+                                  ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      select fr.code, fr.text, fr.dat as dat_str, fr.status, fl.link_id as semd_id
+      from solution_reg.FORM_RESULT_IN fr
+      , solution_data.report_files_link fl
+      where fr.id = fl.link_id
+      and fr.tag =1
+      and fr.link_id = p_visit_id;
+  END get_semd_list_by_visit;
 
+
+  /**
+  * Список СЭМДов по визиту
+  * Параметры:
+    p_doc_id - Идентификатор документа -- test 26803651
+  **/
+  PROCEDURE get_semd_visit(p_doc_id IN NUMBER
+                          ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+  
+    pkg_remd_egisz.get_all_cda_formatted_clob(p_owner => 'SOLUTION_REG',
+                                              p_table => 'FORM_RESULT_IN',
+                                              p_document_id => p_doc_id,
+                                              p_rc => p_rc);
+  END get_semd_visit;
+  
+  
 
 END pkg_web_account_unique_7;
