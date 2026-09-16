@@ -14,7 +14,17 @@ var htmlToPdf = require('html-pdf');
 const sql_get_semd_list_by_visit = "BEGIN "+cfg.db.packageName+".get_semd_list_by_visit(:visit_id, :cursor); END;";
 const sql_get_semd_visit = "BEGIN "+cfg.db.packageName+".get_semd_visit(:doc_id, :cursor); END;";
 
+const cookieParser = require('cookie-parser');
+app.use(cookieParser()); // Подключаем парсер куки
 
+// Тест куки +
+function parseCookies(str) {
+    let rx = /([^;=\s]*)=([^;]*)/g;
+    let obj = { };
+    for ( let m ; m = rx.exec(str) ; )
+        obj[ m[1] ] = decodeURIComponent( m[2] );
+    return obj;
+}
 
 function exeBd(sql, params) {
     return new Promise((resolve, reject) => {
@@ -54,9 +64,15 @@ function get_doc(p_doc_id) {
  *
  */
 
-app.get("/semd/list", global.acsToken, function(req,res) {
+app.get("/semd/list", global.acsToken, (req,res) => {
 //    let user = global.getAuthUser(req);
-    res.cookie('user', 'alex', { maxAge: 900000, httpOnly: true });
+    res.cookie('user', 'alex', {
+        maxAge: 900000, // Время жизни в миллисекундах (15 минут)
+        httpOnly: true  // Защита от доступа через JavaScript в браузере
+    });
+
+    res.cookie('Patient', '12444222CDE');  // Установить куки +
+
     if (req.query && req.query.visitID) {
         let params = {visit_id: req.query.visitID};
         execute.executeRes(sql_get_semd_list_by_visit, params)
@@ -144,5 +160,19 @@ app.get("/semd/:tp/:id.pdf", function(req,res) {
     }
 });
 
+
+app.get("/semd/test", global.acsToken, (req,res) => {
+//    let user = global.getAuthUser(req);
+    const username = req.cookies.user;
+    console.log('COOKIES =', req.cookies);
+    console.log('COOKIES username=', username);
+    console.log('headers cookie: ', req.headers.cookie);
+
+    console.log('headers cookie parseCookies: ', parseCookies(req.headers.cookie));
+
+    res.json(format.getFormatRes(true, {}, null));
+
+//        res.json(format.getFormatRes(false, null, 'Not params'));
+});
 
 module.exports = app;

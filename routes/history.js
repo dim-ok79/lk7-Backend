@@ -216,10 +216,10 @@ app.get("/history/events/item", global.acsToken, function(req,res) {
  *
  */
 
-app.get("/history/events/item/:tp/:id.pdf", function(req,res) {
+app.get("/history/events/item/:tmptoken/:tp/:id.pdf", global.acsTmpToken, function(req,res) {
 //    console.log('+++++++TP=', req.params['tp']); // тип
 //    console.log('+++++++Id=', req.params['id']); // id
-    if (req.params && req.params['tp'] && req.params['id']){
+    if (req.params && req.params['tp'] && req.params['id'] && req.params['tmptoken']){
         let l_id = req.params['id'];
         let l_type = req.params['tp'];
         var options = { format: 'Letter' };
