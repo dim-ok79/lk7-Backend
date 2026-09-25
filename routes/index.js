@@ -14,7 +14,21 @@ const cookieParser = require('cookie-parser');
 
 app.use(cookieParser());
 
-/* Проверка по токену , параметр GET tmptoken*/
+/* Проверка по токену , параметр GET :tmptoken*/
+global.getAuthUserTmpToken = function(req) {
+    if (req.params['tmptoken']) {
+        let tmpToken = TmpTokenArray.getValue(req.params['tmptoken']);
+        if (tmpToken && tmpToken.value && tmpToken.value.token) {
+            let token = tmpToken.value.token;
+            return jwt.decode(token);
+        } else {
+            return null;
+        }
+    } else {
+        return null;
+    }
+}
+
 
 global.acsTmpToken = function(req, res, next) {
     logger.info(`acsTmpToken req.url= ${JSON.stringify(req.url)}`);
@@ -163,7 +177,8 @@ app.use(require('./action'));          // Акции
 
 app.use(require('./semd'));            // СЭМДы
 
-app.use(require('./labs'));            // Лаб анализы
+app.use(require('./labs_new'));            // Лаб анализы
+app.use(require('./reportServ'));      // Лаб анализы в PDF
 
 /*  временные ID вместо токена */
 app.get('/auth/id', global.acsToken, function (req, res) {

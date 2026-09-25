@@ -13,6 +13,9 @@ var htmlToPdf = require('html-pdf');
 
 const sql_get_semd_list_by_visit = "BEGIN "+cfg.db.packageName+".get_semd_list_by_visit(:visit_id, :cursor); END;";
 const sql_get_semd_visit = "BEGIN "+cfg.db.packageName+".get_semd_visit(:doc_id, :cursor); END;";
+const sql_get_semd_list_by_patient = "BEGIN "+cfg.db.packageName+".get_semd_list_by_patient(:p_patient_id, :p_begin_dat, :p_end_dat, :p_start, :p_end, :cursor); END;";
+const sql_get_semd_size_by_patient = "BEGIN "+cfg.db.packageName+".get_semd_size_by_patient(:p_patient_id, :p_begin_dat, :p_end_dat, :cursor); END;";
+
 
 const cookieParser = require('cookie-parser');
 app.use(cookieParser()); // Подключаем парсер куки
@@ -106,7 +109,7 @@ app.get("/semd/list", global.acsToken, (req,res) => {
  *
  */
 
-app.get("/semd/:tp/:id.pdf", function(req,res) {
+app.get("/semd/:tp/:tmptoken/:id.pdf", global.acsTmpToken, function(req,res) {
 //    console.log('+++++++TP=', req.params['tp']); // тип
 //    console.log('+++++++Id=', req.params['id']); // id
     if (req.params && req.params['tp'] && req.params['id']) {
@@ -174,5 +177,83 @@ app.get("/semd/test", global.acsToken, (req,res) => {
 
 //        res.json(format.getFormatRes(false, null, 'Not params'));
 });
+
+/**
+ * @api {get} /semd/patient/list Список СЭМДов по Пациенту (TOKEN)
+ * @apiGroup semd
+ * @apiVersion 0.0.1
+ *
+ * @apiHeader {String} Authorization Authorization: TOKEN *AUTH_TOKEN*
+ *
+ *
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *  {
+ *   }
+ *
+ */
+
+app.get("/semd/patient/list", global.acsToken, (req,res) => {
+    let user = global.getAuthUser(req);
+    let params = {p_patient_id: user.patient_id, p_begin_dat: null, p_end_dat: null, p_start: null, p_end: null};
+
+    if (req.query && req.query.beginDate && req.query.endDate && req.query.start && req.query.end) {
+        params.p_begin_dat = req.query.beginDate;
+        params.p_end_dat = req.query.endDate;
+        params.p_start = req.query.start;
+        params.p_end = req.query.end;
+        execute.executeRes(sql_get_semd_list_by_patient, params)
+            .then(result => {
+                let r = format.assocArrayFromJSON(result);
+                res.json(format.getFormatRes(true, r, null));
+            })
+            .catch(err => {
+                res.json(format.getFormatRes(false, null, err));
+            });
+
+    } else {
+        res.json(format.getFormatRes(false, null, 'Not params'));
+    }
+});
+
+/**
+ * @api {get} /semd/patient/list/size Количество СЭМДов по Пациенту (TOKEN)
+ * @apiGroup semd
+ * @apiVersion 0.0.1
+ *
+ * @apiHeader {String} Authorization Authorization: TOKEN *AUTH_TOKEN*
+ * @apiParam {String} beginDate  Дата начала
+ * @apiParam {String} endDate  Дата окончания
+ *
+ *
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *  {
+ *   }
+ *
+ */
+
+app.get("/semd/patient/list/size", global.acsToken, (req,res) => {
+    let user = global.getAuthUser(req);
+    let params = {p_patient_id: user.patient_id, p_begin_dat: null, p_end_dat: null};
+
+    if (req.query && req.query.beginDate && req.query.endDate) {
+        params.p_begin_dat = req.query.beginDate;
+        params.p_end_dat = req.query.endDate;
+        execute.executeRes(sql_get_semd_size_by_patient, params)
+            .then(result => {
+                let r = format.assocArrayFromJSON(result);
+                res.json(format.getFormatRes(true, r[0], null));
+            })
+            .catch(err => {
+                res.json(format.getFormatRes(false, null, err));
+            });
+
+    } else {
+        res.json(format.getFormatRes(false, null, 'Not params'));
+    }
+});
+
+
 
 module.exports = app;

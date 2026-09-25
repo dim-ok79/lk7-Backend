@@ -200,7 +200,7 @@ app.get("/history/events/item", global.acsToken, function(req,res) {
 });
 
 /**
- * @api {get} /history/events/item/:tp/:id.pdf 4) Описание посещения пациента PDF
+ * @api {get} /history/events/item/:tmptoken/:id.pdf 4) Описание посещения пациента PDF
  * @apiGroup history
  * @apiVersion 0.0.1
  *
