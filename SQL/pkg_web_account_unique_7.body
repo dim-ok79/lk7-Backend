@@ -1,3 +1,4 @@
+
 CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
 
   PROCEDURE set_context_userid AS
@@ -3801,6 +3802,963 @@ and fr.link_id = v.keyid) AS count_files
                                               p_rc => p_rc);
   END get_semd_visit;
   
+  /**
+  * Получение количества лабораторных заказов пациента
+  * Параметр: p_patient_id - идентификатор пациента
+  * p_begin_dat - начальная дата
+  * p_end_dat - конечная дата
+  **/
+  PROCEDURE lab_orders_size(p_patient_id IN NUMBER
+                              ,p_dat_from   IN DATE
+                              ,p_dat_to     IN DATE
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    IF p_dat_from IS NOT NULL
+       OR p_dat_to IS NOT NULL THEN
+    OPEN p_rc FOR
+--      SELECT count(rr.orderid) AS "size"
+      SELECT count(1) AS "size"
+        FROM solution_lab.research rr
+       WHERE rr.patient_id = p_patient_id
+         AND trunc(rr.regdate) BETWEEN (p_dat_from) AND trunc(p_dat_to+1)
+         and rr.root_id IS NULL;
+     ELSE
+    OPEN p_rc FOR
+--      SELECT count(rr.orderid) AS "size"
+      SELECT count(1) AS "size"
+        FROM solution_lab.research rr
+       WHERE rr.patient_id = p_patient_id
+         and rr.root_id IS NULL;
+     END IF;
+  END lab_orders_size;
+  
+/* p_orderbyASC - сортировка 1 ASC, 0 DESC  */
+-- material_id  - номер заказа
+  PROCEDURE lab_orders(p_patient_id IN NUMBER
+                              ,p_dat_from   IN DATE
+                              ,p_dat_to     IN DATE
+                              ,p_start      IN NUMBER
+                              ,p_end        IN NUMBER
+                              ,p_orderbyASC IN NUMBER
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+
+  BEGIN
+
+    OPEN p_rc FOR
+      SELECT * FROM (
+         SELECT v.* ,rownum AS rnum
+         FROM (SELECT
+               CASE p_orderbyASC WHEN 1 THEN row_number() OVER (ORDER BY rr.regdate ASC)
+                    ELSE row_number() OVER (ORDER BY rr.regdate DESC)
+              END AS ord
+            ,rr.id AS research_id
+            ,rr.orderid
+            ,to_char(rr.regdate, format_date_front) AS regdate
+            ,CASE rr.status WHEN 'A' THEN (SELECT DECODE(COUNT(r.id), 0, 'P', 'W') FROM solution_lab.research r WHERE r.root_id = rr.id AND r.status IN ('R', 'F', '3'))
+              WHEN 'I' THEN 'N'
+              WHEN 'S' THEN 'N'
+              WHEN 'R' THEN 'F'
+              WHEN 'F' THEN 'R'
+              WHEN 'X' THEN 'X'
+              WHEN '1' THEN 'N'
+              WHEN '2' THEN 'N'
+              WHEN '3' THEN 'R'
+--              WHEN '5' THEN 'N'
+              WHEN '5' THEN 'R'
+              ELSE rr.status
+              END AS status
+             ,CASE rr.status WHEN 'A' THEN (SELECT DECODE(COUNT(r.id), 0, 'в работе', 'частично выполнен') FROM solution_lab.research r WHERE r.root_id = rr.id AND r.status IN ('R', 'F', '3'))
+              WHEN 'I' THEN 'ожидает обработки'
+              WHEN 'S' THEN 'ожидает обработки'
+              WHEN 'R' THEN 'выполнен'
+              WHEN 'F' THEN 'выполнен'
+              WHEN 'X' THEN 'отменён'
+              WHEN '1' THEN 'ожидает обработки'
+              WHEN '2' THEN 'ожидает обработки'
+              WHEN '3' THEN 'выполнен'
+--              WHEN '5' THEN 'ожидает обработки'
+              WHEN '5' THEN 'выполнен'
+              WHEN 'N' THEN 'не сдан'
+              ELSE 'не определен'
+              END AS text_status
+           , rr.orderid AS material_id
+/*
+            ,r.id AS material_id
+            ,r.ids
+            ,(SELECT l.text
+                FROM solution_lab.lu l
+               WHERE l.id = r.specimen_id) AS specimen
+            ,r.finishdate AS material_finishdate
+            ,decode(r.status, 'I', 'N', 'S', 'N', 'A', 'P', 'F', 'R', '1', 'N', '2', 'N', '3', 'R', '5', 'N', r.status) AS material_status
+            ,p_lab_report.get_research_status_for_docs(r.status) AS text_material_status
+*/
+        FROM /* solution_lab.research r
+            , */
+            solution_lab.research rr
+       WHERE -- r.patient_id = p_patient_id
+         rr.patient_id = p_patient_id
+         and rr.root_id IS NULL
+         --AND r.root_id = rr.id
+         AND trunc(rr.regdate) BETWEEN trunc(p_dat_from) AND trunc(p_dat_to+1)
+       ORDER BY ord) v
+--       ORDER BY r.regdate DESC ,r.ids) v
+                 WHERE rownum <= p_end)
+         WHERE rnum >= p_start;
+
+  END lab_orders;
+  
+  PROCEDURE get_lab_result(p_research_id IN NUMBER
+                          ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+    l_research_id NUMBER;
+    l_is_root     NUMBER;
+  BEGIN
+    SELECT COUNT(r.id)
+      INTO l_research_id
+      FROM solution_lab.research r
+     WHERE r.root_id = p_research_id;
+
+    IF l_research_id > 0 THEN
+      l_is_root := 1;
+    ELSE
+      l_is_root := 0;
+    END IF;
+
+    OPEN p_rc FOR
+      SELECT --заголовок
+       ri.srvtext
+      ,ri.order_num
+      ,ri.ids
+      ,ri.id
+      ,ri.specimen_text
+      ,ri.regdate
+       --данные "обычных" результатов
+      ,trr.res_display_order_title_id AS title_id
+      ,trr.title
+      ,trr.res_display_order
+      ,trr.measur AS test_name
+      ,nvl(trr.text, trr.value) AS VALUE
+      ,trr.result_note AS value_note
+      ,trr.unit
+      ,trr.norm
+      ,trr.pat_level
+      ,trr.norm_min
+      ,trr.norm_max
+      ,trr.norm_note
+      ,trr.last_res --
+      ,trr.data_last_res --
+       --данные мбио
+      ,mbio.abio_bactery_text
+      ,mbio.abio_bactery_sortcode
+      ,mbio.abio_koe
+      ,mbio.res_bactery_text
+      ,mbio.res_antibiotic_text
+      ,mbio.res_sortcode
+      ,decode(mbio.res_sir, 1, 'S', 2, 'I', 3, 'R', 'N') AS res_sir
+      ,mbio.res_mic
+      ,mbio.res_dia
+      ,mbio.abio_conclusion --
+      ,mbio.abio_note --
+
+        FROM (SELECT r.id
+                    ,listagg(fn_get_serv_name(oi.srvdep_id), ', ') within GROUP(ORDER BY r.id) AS srvtext
+                    ,(SELECT text
+                        FROM solution_lab.lu l
+                       WHERE l.tag = 1
+                         AND r.specimen_id = l.id) AS specimen_text
+                    ,r.ids AS ids
+                    ,r.regdate AS regdate
+                    ,r.orderid AS order_num
+                FROM solution_lab.research   r
+                    ,solution_lab.order_info oi
+               WHERE oi.research_id = r.id
+                 AND ((l_is_root = 0 AND r.id = p_research_id) OR (l_is_root = 1 AND r.root_id = p_research_id))
+               GROUP BY r.id
+                       ,r.specimen_id
+                       ,r.ids
+                       ,r.orderid
+                       ,r.regdate) ri
+
+        FULL JOIN (SELECT '1' AS sortcode
+                         ,dist AS dist
+                         ,measur AS measur
+                         ,unit AS unit
+                         ,dbms_lob.substr(nvl(VALUE, ''), 4000, 1) AS VALUE
+                         ,norm AS norm
+                         ,pat_level
+                         ,norm_min
+                         ,norm_max
+                         ,dbms_lob.substr(nvl(text, ''), 4000, 1) AS text
+                         ,norm_note AS norm_note
+                         ,result_note AS result_note
+                         ,nvl(res_display_order, 0) AS res_display_order
+                         ,nvl(wrv_order, 0) AS wrv_order
+                         ,nvl(r_id, 0) AS r_id
+                         ,nvl(title_num, 0) AS res_display_order_title_id
+                         ,title AS title
+                         ,dir_doctor AS dir_doctor
+                         ,res_type /* тип результата: 0 - обычный, 1 - протокол */
+                         ,title_note /* Примечание к материалу */
+                         ,last_res
+                         ,data_last_res
+                     FROM ( /* Обычные результаты */
+                           /*SELECT p_lab_report.get_pathology_mark_by_rv_id(rv.id) AS dist
+                                  ,wr.text AS measur
+                                  ,(SELECT l.text
+                                      FROM solution_lab.lu l
+                                     WHERE l.id = (nvl(wrv.display_unit_id, wrv.unit_id))) AS unit
+                                  ,NULL AS VALUE
+                                  ,rv.norm_text AS norm
+                                  ,p_lab.get_pat_level_str(p_lab.get_pat_level_num(rv.value, rv.norm_id)) AS pat_level
+                                  ,(SELECT to_char(n.norm_low)
+                                      FROM solution_lab.norm n
+                                     WHERE n.id = rv.norm_id) AS norm_min
+                                  ,(SELECT to_char(n.norm_high)
+                                      FROM solution_lab.norm n
+                                     WHERE n.id = rv.norm_id) AS norm_max
+                                  ,to_clob(p_lab_report.format_result_value(rv.value, wrv.display_format_id)) AS text
+                                  ,p_lab.get_norm_note(rv.id) AS norm_note
+                                  ,rv.note AS result_note
+                                  ,wr.res_display_order
+                                  ,wrv.display_order AS wrv_order
+                                  ,wgt.num AS title_num
+                                  ,wgt.text AS title
+                                  ,r.id AS r_id
+                                  ,p_lab_report.get_research_direct_doctor(rr.id) AS dir_doctor
+                                  ,'0' AS res_type
+                                  ,r.note AS title_note
+                                  ,fn_last_result_value(rv.workresult_value_id, r.patient_id, r.id, 0) AS last_res
+                                  ,fn_last_result_value(rv.workresult_value_id, r.patient_id, r.id, 1) AS data_last_res
+
+                             FROM solution_lab.research               rr
+                                  ,solution_lab.research               r
+                                  ,solution_lab.workresult_value       wrv
+                                  ,solution_lab.workresult             wr
+                                  ,solution_lab.work                   w
+                                  ,solution_lab.result                 res
+                                  ,solution_lab.result_value           rv
+                                  ,solution_lab.order_info             oi
+                                  ,solution_lab.orderworkflow          owf
+                                  ,solution_lab.workflow               wf
+                                  ,solution_lab.workresult_group_title wgt
+                            WHERE rr.id = r.root_id
+                              AND r.id = oi.research_id
+                              AND owf.order_id = oi.id
+                              AND owf.workflow_id = wf.id
+                              AND w.id = wf.work_id
+                              AND wr.work_id = w.id
+                              AND wrv.id = rv.workresult_value_id
+                              AND res.workresult_id = wr.id
+                              AND rv.result_id = res.id
+                              AND rv.check_status = 1
+                              AND rv.deny_print_status = 0
+                              AND rv.active_status = 1
+                              AND owf.id = res.orderworkflow_id
+                              AND wr.res_display_order_title_id = wgt.id(+)
+                              AND (nvl(wrv.hide_zero_value, 0) = 0 OR p_lab.is_zero_value(rv.value) = 0)
+                              AND r.status IN ('R', 'F')
+                              AND ((l_is_root = 0 AND r.id = p_research_id) OR (l_is_root = 1 AND r.root_id = p_research_id))
+                           UNION ALL*/
+                           /* Протокольные результаты */
+                           SELECT NULL AS dist
+                                  ,fi.text AS measur
+                                  ,NULL AS unit
+                                  ,NULL AS VALUE
+                                  ,NULL AS norm
+                                  ,NULL AS pat_level
+                                  ,NULL AS norm_min
+                                  ,NULL AS norm_max
+                                  ,nvl(frv.c_text, to_clob(frv.text)) AS text
+                                  ,p_lab.get_norm_note(rv.id) AS norm_note
+                                  ,rv.note AS result_note
+                                  ,wr.res_display_order
+                                  ,fi.sortcode AS wrv_order
+                                  ,wr.res_display_order AS title_num
+                                  ,wr.text AS title
+                                  ,r.id AS r_id
+                                  ,p_lab_report.get_research_direct_doctor(rr.id) AS dir_doctor
+                                  ,'1' AS res_type
+                                  ,r.note AS title_note
+                                  ,NULL AS last_res
+                                  ,NULL AS data_last_res
+                             FROM solution_lab.research          rr
+                                  ,solution_lab.research          r
+                                  ,solution_lab.workresult_value  wrv
+                                  ,solution_lab.workresult        wr
+                                  ,solution_lab.form_result_value frv
+                                  ,solution_form.form_item        fi
+                                  ,solution_lab.result            res
+                                  ,solution_lab.result_value      rv
+                                  ,solution_lab.order_info        oi
+                                  ,solution_lab.orderworkflow     owf
+                            WHERE r.root_id = rr.id
+                              AND r.id = oi.research_id
+                              AND owf.order_id = oi.id
+                              AND owf.workflow_id = wrv.id
+                              AND rv.workresult_value_id = wrv.id
+                              AND res.workresult_id = wr.id
+                              AND p_lab_utils.get_rv_form_result_id(rv.id) = frv.form_result_id
+                              AND frv.form_item_id = fi.id
+                              AND nvl(frv.c_text, frv.text) IS NOT NULL
+                              AND rv.check_status = 1
+                              AND rv.deny_print_status = 0
+                              AND rv.active_status = 1
+                              AND rv.result_id = res.id
+                              AND owf.id = res.orderworkflow_id
+                              AND r.status IN ('R', 'F') --только готовые
+                              AND ((l_is_root = 0 AND r.id = p_research_id) OR (l_is_root = 1 AND r.root_id = p_research_id)))
+                   UNION ALL
+                   /* Внешняя лаборатория (test, test_result) и ручной ввод */
+                   SELECT sortcode
+                         ,dist AS dist
+                         ,measur AS measur
+                         ,unit AS unit
+                         ,dbms_lob.substr(nvl(VALUE, ''), 4000, 1) AS VALUE
+                         ,norm AS norm
+                         ,pat_level
+                         ,norm_min
+                         ,norm_max
+                         ,dbms_lob.substr(nvl(text, ''), 4000, 1) AS text
+                         ,norm_note AS norm_note
+                         ,result_note AS result_note
+                         ,nvl(res_display_order, 0) AS res_display_order
+                         ,0 AS wrv_order
+                         ,nvl(r_id, 0) AS r_id
+                         ,nvl(title_num, 0) AS res_display_order_title_id
+                         ,title AS title
+                         ,' ' AS dir_doctor
+                         ,res_type
+                         ,title_note
+                         ,last_res
+                         ,data_last_res
+                     FROM (SELECT '2' AS sortcode
+                                 ,tr.pathology AS dist
+                                 ,m.text AS measur
+                                 ,tr.unit
+                                 ,to_clob(tr.result) AS VALUE
+                                 ,tr.notes AS norm
+                                 ,tr.pathology AS pat_level
+                                 ,tr.norm_min
+                                 ,tr.norm_max
+                                 ,to_clob(tr.text) AS text
+                                 ,NULL AS norm_note
+                                 ,NULL AS result_note
+                                 ,tr.notes
+                                 ,t.notes AS test_notes
+                                 ,tr.headermark
+                                 ,nvl(tr.seqno, dense_rank() over(ORDER BY m.lcode)) AS res_display_order
+                                 ,dense_rank() over(ORDER BY d.text) AS title_num
+                                 ,decode(r.specimen_id
+                                        ,NULL
+                                        ,p_lab.get_lu_text(rr.specimen_id)
+                                        ,p_lab.get_lu_text(r.specimen_id)) AS materialid
+                                 ,nvl(r.id, 0) AS r_id
+                                 ,r.ids
+                                 ,d.text AS title
+                                 ,'0' AS res_type
+                                 ,r.note AS title_note
+                                 ,fn_last_test_result_value(tr.id, r.patient_id, 0) AS last_res
+                                 ,fn_last_test_result_value(tr.id, r.patient_id, 1) AS data_last_res
+                             FROM solution_lab.test_result tr
+                                 ,solution_lab.lu          m
+                                 ,solution_lab.test        t
+                                 ,solution_lab.lu          d
+                                 ,solution_lab.research    r
+                                 ,solution_lab.research    rr
+                            WHERE ((l_is_root = 0 AND r.id = p_research_id) OR
+                                  (l_is_root = 1 AND r.root_id = p_research_id))
+                              AND t.research_id = r.id
+                              AND t.description_id = d.id
+                              AND tr.test_id = t.id
+                              AND tr.measur_id = m.id
+                              AND rr.id(+) = r.root_id
+                           UNION ALL
+                           /* ручной ввод (протоколы СИ-лаборатории) */
+                           SELECT '3' AS sortcode
+                                 ,NULL AS dist
+                                 ,fi.text AS measur
+                                 ,NULL AS unit
+                                 ,nvl(frv.c_text, to_clob(frv.text)) AS VALUE
+                                 ,NULL AS norm
+                                 ,NULL AS pat_level
+                                 ,'' AS norm_min
+                                 ,'' AS norm_max
+                                 ,nvl(frv.c_text, to_clob(frv.text)) AS text
+                                 ,NULL AS norm_note
+                                 ,NULL AS result_note
+                                 ,NULL AS notes
+                                 ,NULL test_notes
+                                 ,NULL AS headermark
+                                 ,fi.sortcode AS res_display_order
+                                 ,fr.id AS res_display_order_title_id
+                                 ,p_lab.get_lu_text(l_serv.root_id) AS materialid
+                                 ,nvl(r.id, 0) AS r_id
+                                 ,r.ids
+                                 ,fr.text AS title
+                                 ,'1' AS res_type
+                                 ,r.note AS title_note
+                                 ,NULL AS last_res
+                                 ,NULL AS data_last_res
+                             FROM solution_lab.form_result       fr
+                                 ,solution_lab.form_result_value frv
+                                 ,solution_form.form_item        fi
+                                 ,solution_lab.order_info        oi
+                                 ,solution_lab.research          r
+                                 ,solution_lab.lu                l_serv
+                            WHERE ((l_is_root = 0 AND r.id = p_research_id) OR
+                                  (l_is_root = 1 AND r.root_id = p_research_id))
+                              AND oi.research_id = r.id
+                              AND fr.link_id = oi.id
+                              AND frv.form_result_id = fr.id
+                              AND fi.id = frv.form_item_id
+                              AND oi.service_id = l_serv.id)
+                    ORDER BY sortcode
+                            ,res_display_order_title_id
+                            ,res_display_order
+                            ,wrv_order) trr
+          ON (trr.r_id = ri.id)
+        FULL JOIN (SELECT abio.abio_r_id AS rid
+                         ,abio.*
+                         ,res.*
+                     FROM (SELECT DISTINCT r.id AS abio_r_id
+                                          ,r.collect_place_id AS abio_collect_place_id
+                                          ,oi.id AS abio_oi_id
+                                          ,oi.srvdep_id AS abio_srvdep_id
+                                          ,mr.id AS abio_mr_id
+                                          ,mr.note AS abio_note
+                                          ,mr.conclusion AS abio_conclusion
+                                          ,mb1.id AS abio_mb_id
+                                          ,mb1.sortcode AS abio_bactery_sortcode
+                                          ,mb1.bactery_text AS abio_bactery_text
+                                          ,TRIM(mb1.koe || ' ' || mb1.koe_units) AS abio_koe
+                                          ,ma.antibiotic_text AS abio_antibiotic_text
+                                          ,ma.sortcode AS abio_ab_sortcode
+                             FROM solution_lab.research r
+                             JOIN solution_lab.order_info oi
+                               ON oi.research_id = r.id
+                             JOIN solution_lab.mbio_result mr
+                               ON mr.order_info_id = oi.id
+                             LEFT JOIN solution_lab.mbio_bactery mb
+                               ON mb.mbio_result_id = mr.id
+                             LEFT JOIN solution_lab.mbio_antibiotic ma
+                               ON ma.mbio_bactery_id = mb.id
+                             LEFT JOIN solution_lab.mbio_bactery mb1
+                               ON mb1.mbio_result_id = mr.id
+                            WHERE ((l_is_root = 0 AND r.id = p_research_id) OR
+                                  (l_is_root = 1 AND r.root_id = p_research_id))
+                              AND mr.check_status = 1
+                              AND (decode(ma.sir, NULL, 0, 1) >= decode(ma.dia, NULL, 0, 1) OR
+                                  decode(ma.mic, NULL, 0, 1) >= decode(ma.dia, NULL, 0, 1))
+                              AND nvl(mb.deny_print_status, 0) = 0
+                              AND nvl(ma.deny_print_status, 0) = 0) abio
+
+                    RIGHT JOIN
+
+                    (SELECT DISTINCT mb.bactery_text AS res_bactery_text
+                                   ,ma.antibiotic_text AS res_antibiotic_text
+                                   ,ma.sortcode AS res_sortcode
+                                   ,(SELECT decode(ant.deny_print_status, 1, NULL, sir)
+                                       FROM solution_lab.mbio_antibiotic ant
+                                           ,solution_lab.mbio_bactery    bact
+                                      WHERE ant.mbio_bactery_id = bact.id
+                                        AND ant.antibiotic_text = ma.antibiotic_text
+                                        AND bact.id = mb.id
+                                        AND ant.active_status = 1) AS res_sir
+                                   ,ma.dia AS res_dia
+                                   ,ma.mic res_mic
+                                   ,r.id AS res_r_id
+                                   ,mb.id AS res_mb_id
+                      FROM solution_lab.research r
+                      JOIN solution_lab.order_info oi
+                        ON oi.research_id = r.id
+                      JOIN solution_lab.mbio_result mr
+                        ON mr.order_info_id = oi.id
+                      LEFT JOIN solution_lab.mbio_bactery mb
+                        ON mb.mbio_result_id = mr.id
+                      LEFT JOIN solution_lab.mbio_antibiotic ma
+                        ON ma.mbio_bactery_id = mb.id
+                     WHERE ((l_is_root = 0 AND r.id = p_research_id) OR (l_is_root = 1 AND r.root_id = p_research_id))
+                       AND mr.check_status = 1
+                       AND ma.active_status = 1
+                       AND (decode(ma.sir, NULL, 0, 1) >= decode(ma.dia, NULL, 0, 1) OR
+                           decode(ma.mic, NULL, 0, 1) >= decode(ma.dia, NULL, 0, 1))
+                       AND nvl(ma.deny_print_status, 0) = 0
+                       AND nvl(mb.deny_print_status, 0) = 0) res
+                       ON (res.res_r_id = abio.abio_r_id AND res.res_bactery_text = abio.abio_bactery_text)
+                      AND res.res_bactery_text = abio.abio_bactery_text
+                      AND res.res_antibiotic_text = abio.abio_antibiotic_text
+                      AND res.res_sortcode = abio.abio_ab_sortcode
+                    WHERE (abio.abio_antibiotic_text <> ' ')
+                    ORDER BY abio_bactery_sortcode DESC
+                            ,abio_ab_sortcode      DESC) mbio
+          ON (mbio.rid = ri.id)
+       ORDER BY id
+               ,res_display_order;
+
+  END get_lab_result;
+  
+  FUNCTION fn_last_test_result_value(p_test_res_id IN solution_lab.test_result.id%TYPE
+                                    ,p_patient_id  IN solution_lab.research.patient_id%TYPE
+                                    ,p_type        IN NUMBER) RETURN VARCHAR2 IS
+    l_result_value VARCHAR2(4000);
+    l_result_date  DATE;
+  BEGIN
+    SELECT DISTINCT MAX(nvl(tr1.finishdate, tr1.createdate))
+                   ,tr1.text
+      INTO l_result_date
+          ,l_result_value
+      FROM solution_lab.test_result tr
+          ,solution_lab.test_result tr1
+     WHERE tr.id <> tr1.id
+       AND tr.id = p_test_res_id
+       AND tr.test_id = tr1.test_id
+       AND tr.measur_id = tr1.measur_id
+       AND tr.test_id IN (SELECT t.id
+                            FROM solution_lab.test t
+                           WHERE t.research_id IN (SELECT r.id
+                                                     FROM solution_lab.research r
+                                                    WHERE r.patient_id = p_patient_id))
+     GROUP BY tr1.text;
+
+    IF p_type = 1 THEN
+      RETURN l_result_date;
+    ELSE
+      RETURN l_result_value;
+    END IF;
+
+  END fn_last_test_result_value;
+  
+  /**
+  * Получение данных о файле лаб. заказа
+  * Параметры: p_patient_id - идентификатор пациента
+  *            p_research_id  - идентификатор лаб. заказа
+  **/
+
+  /** Процедура протестирована на данных из быза заказчика Олимп Здоровья (ru360002) **/
+
+  PROCEDURE get_lab_document_info(p_patient_id  IN NUMBER
+                                 ,p_research_id IN NUMBER
+                                 ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+
+  BEGIN
+
+    OPEN p_rc FOR
+      WITH r_id AS
+       (SELECT r.id
+              ,r.root_id
+          FROM solution_lab.research r
+         WHERE r.patient_id = p_patient_id
+           AND (r.root_id = p_research_id OR r.id = p_research_id))
+      SELECT rd.id AS id
+            ,'LAB_RESEARCH_DOCUMENT' AS file_type
+            ,rd.filename AS file_name
+            ,decode(rd.tag, 0, 'Бланк направления', 2, 'Бланк результатов') AS file_note
+            ,nvl(rd.filetype, regexp_substr(rd.filename, '(jpg|pdf|txt|bmp|doc|xls|png)', 1, 1)) AS content_type
+        FROM solution_data.lab_research_document rd
+        JOIN r_id
+          ON rd.research_id IN (r_id.id)
+         AND rd.tag IN (0, 2)
+      UNION ALL
+      SELECT d.id AS id
+            ,'DOCUMENTS' AS file_type
+            ,d.filename AS file_name
+            ,d.name AS file_note
+            ,nvl(d.filetype, regexp_substr(d.filename, '(jpg|pdf|txt|bmp|doc|xls|png)', 1, 1)) AS content_type
+        FROM solution_data.documents d
+        JOIN v_lab_research_result vres
+          ON vres.result_value_id = d.link_id
+        JOIN r_id
+          ON vres.research_id IN (r_id.id)
+       WHERE d.tag = 9
+      UNION ALL
+      SELECT i.id AS id
+            ,'LAB_RESULT_IMAGE' AS file_type
+            ,i.full_name AS file_name
+            ,'Изображение' AS file_note
+            ,regexp_substr(i.full_name, '(jpg|pdf|txt|bmp|doc|xls|png)', 1, 1) AS content_type
+        FROM solution_data.lab_result_image i
+        JOIN v_lab_research_result vres
+          ON vres.result_value_id = i.result_value_id
+        JOIN r_id
+          ON vres.research_id IN (r_id.id);
+
+  END get_lab_document_info;
+
+  /**
+  * Получение файла лаб. заказа
+  * Параметры: p_patient_id - идентификатор пациента
+  *            p_research_id  - идентификатор лаб. заказа
+               p_file_id - идентификатор файла
+               p_file_type - тип фаила (в какой таблице находится
+  **/
+
+  /** Процедура протестирована на данных из быза заказчика Олимп Здоровья (ru360002) **/
+
+  PROCEDURE get_lab_document_file(p_patient_id  IN NUMBER
+                                 ,p_research_id IN NUMBER
+                                 ,p_file_id     IN NUMBER
+                                 ,p_file_type   IN VARCHAR2
+                                 ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+
+  BEGIN
+
+    OPEN p_rc FOR
+      WITH r_id AS
+       (SELECT r.id
+              ,r.root_id
+          FROM solution_lab.research r
+         WHERE r.patient_id = p_patient_id
+           AND (r.root_id = p_research_id OR r.id = p_research_id)),
+      r_file AS
+       (SELECT rd.id AS id
+              ,'LAB_RESEARCH_DOCUMENT' AS file_type
+              ,rd.content
+              ,nvl(rd.filetype, regexp_substr(rd.filename, '(jpg|pdf|txt|bmp|doc|xls|png)', 1, 1)) AS content_type
+          FROM solution_data.lab_research_document rd
+          JOIN r_id
+            ON rd.research_id IN (r_id.id)
+           AND rd.tag IN (0, 2)
+        UNION ALL
+        SELECT d.id AS id
+              ,'DOCUMENTS' AS file_type
+              ,d.content
+              ,nvl(d.filetype, regexp_substr(d.filename, '(jpg|pdf|txt|bmp|doc|xls|png)', 1, 1)) AS content_type
+          FROM solution_data.documents d
+          JOIN v_lab_research_result vres
+            ON vres.result_value_id = d.link_id
+          JOIN r_id
+            ON vres.research_id IN (r_id.id)
+         WHERE d.tag = 9
+        UNION ALL
+        SELECT i.id AS id
+              ,'LAB_RESULT_IMAGE' AS file_type
+              ,i.image AS content
+              ,regexp_substr(i.full_name, '(jpg|pdf|txt|bmp|doc|xls|png)', 1, 1) AS content_type
+          FROM solution_data.lab_result_image i
+          JOIN v_lab_research_result vres
+            ON vres.result_value_id = i.result_value_id
+          JOIN r_id
+            ON vres.research_id IN (r_id.id))
+      SELECT rf.content
+            ,rf.content_type
+        FROM r_file rf
+       WHERE rf.id = p_file_id
+         AND rf.file_type LIKE p_file_type;
+
+  END get_lab_document_file;
+  
+  PROCEDURE get_lab_result_html (p_research_id IN NUMBER
+                                   ,p_rc       IN OUT pkg_global.ref_cursor_type
+                                    ) AS
+  BEGIN
+    get_lab_research_info(p_research_id, 1);
+    pkg_html.get_tmp_html(null, p_rc);
+
+  END get_lab_result_html;
+  
+  /*==========================================================================*/
+  /* Информация по всему заказу копия p_hist_html.get_lab_research_info*/
+  /*==========================================================================*/
+  PROCEDURE get_lab_research_info(p_research_id IN NUMBER
+                                 ,p_erase       IN NUMBER) AS
+    l_v_research_rec solution_lab.v_research%ROWTYPE;
+    l_direct_str     VARCHAR2(1000);
+  BEGIN
+    IF p_erase = 1 THEN
+      pkg_html.truncate_tmp_html();
+      pkg_html.w_style('verdana', 10);
+/*
+      w('<html>');
+      w_head();
+      w_style();
+      w('<body>');
+*/
+    END IF;
+
+    SELECT v.*
+      INTO l_v_research_rec
+      FROM solution_lab.v_research v
+     WHERE v.id = p_research_id;
+
+    SELECT (CASE
+             WHEN l_v_research_rec.external_customer != ' '
+                  AND l_v_research_rec.external_doc != ' ' THEN
+              l_v_research_rec.external_doc || ' (' || l_v_research_rec.external_customer || ')'
+             WHEN l_v_research_rec.external_customer IS NOT NULL
+                  AND l_v_research_rec.external_doc IS NULL THEN
+              l_v_research_rec.external_customer
+             WHEN l_v_research_rec.internal_customer IS NOT NULL
+                  AND l_v_research_rec.internal_doc IS NOT NULL THEN
+              l_v_research_rec.internal_doc || ' (' || l_v_research_rec.internal_customer || ')'
+             WHEN l_v_research_rec.internal_customer IS NOT NULL
+                  AND l_v_research_rec.internal_doc IS NULL THEN
+              l_v_research_rec.internal_customer
+             WHEN l_v_research_rec.docdep_direct_doctor IS NOT NULL THEN
+              l_v_research_rec.docdep_direct_doctor
+             WHEN l_v_research_rec.lu_direct_doctor IS NOT NULL THEN
+              l_v_research_rec.lu_direct_doctor
+           END)
+      INTO l_direct_str
+      FROM dual;
+
+/*
+    --  Регистрационная информация
+    pkg_html.w('<table width="100%" bgcolor=#000000 cellspacing=1 cellpadding=5><tr><td bgcolor=#FFFFCC>');
+    pkg_html.w_h('<font color=#006600>' || to_char(l_v_research_rec.regdate, 'dd.mm.yyyy') || ' : </font>' ||
+        'ЛАБОРАТОРНЫЕ ИССЛЕДОВАНИЯ'
+       ,'#CC0000');
+    pkg_html.w('</td></tr></table>');
+*/
+    pkg_html.w('<div style="margin-left:20">');
+
+    pkg_html.w('<br>');
+    pkg_html.w('<table cellspacing=0 cellpadding=1>');
+
+
+    IF l_direct_str IS NOT NULL THEN
+      pkg_html.w_row('Направил:', l_direct_str);
+    END IF;
+
+    pkg_html.w('</table>');
+    pkg_html.w('<br>');
+
+    FOR res IN (SELECT 0 AS sortcode
+                      ,r.id AS research_id
+                      ,(SELECT decode(COUNT(1), 0, 0, 1)
+                          FROM solution_lab.test t
+                         WHERE t.research_id = r.id) AS ext_results
+                      ,CASE
+                         WHEN length(rtrim(r.status, '01235')) > 0 THEN
+                          1
+                         ELSE
+                          0
+                       END AS internal_order
+                  FROM solution_lab.research r
+                 WHERE r.id = l_v_research_rec.id
+                   AND r.root_id IS NOT NULL
+                UNION ALL
+                SELECT 1 AS sortcode
+                      ,r.id AS research_id
+                      ,(SELECT decode(COUNT(1), 0, 0, 1)
+                          FROM solution_lab.test t
+                         WHERE t.research_id = r.id) AS ext_results
+                      ,CASE
+                         WHEN length(rtrim(r.status, '01235')) > 0 THEN
+                          1
+                         ELSE
+                          0
+                       END AS internal_order
+                  FROM solution_lab.research r
+                 WHERE r.root_id = l_v_research_rec.id
+                 ORDER BY sortcode
+                         ,research_id)
+    LOOP
+      IF res.ext_results = 0
+         AND res.internal_order = 0 THEN
+        CONTINUE;
+      END IF;
+
+      IF res.ext_results = 1 THEN
+        p_hist_html.get_lab_child_research_info_e(res.research_id, 1 - res.internal_order);
+      END IF;
+
+      IF res.internal_order = 1 THEN
+        p_hist_html.get_lab_child_research_info(res.research_id, 1 - res.ext_results);
+      END IF;
+      pkg_html.w('</br>');
+    END LOOP;
+
+    IF l_v_research_rec.narrative IS NOT NULL THEN
+      pkg_html.w('<br>');
+      pkg_html.w('<table cellspacing=0 cellpadding=1>');
+      pkg_html.w_row('Заключение :', l_v_research_rec.narrative);
+      pkg_html.w('</table>');
+    END IF;
+
+    pkg_html.w('</div>');
+
+    pkg_html.w('</br>');
+/*
+    IF p_erase = 1 THEN
+      pkg_html.w('</body>');
+      pkg_html.w('</html>');
+    END IF;
+*/
+  EXCEPTION
+    WHEN no_data_found THEN
+      NULL;
+
+  END get_lab_research_info;
   
 
+/*****************************************/
+/*   Количество ЛАБ анализов по пациенту */
+/*****************************************/
+  PROCEDURE get_lab_list_size(p_patient_id IN NUMBER
+                              ,p_begin_dat  IN VARCHAR2
+                              ,p_end_dat    IN VARCHAR2
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+  l_begin_dat DATE;
+  l_end_dat   DATE;
+  BEGIN
+    l_begin_dat := to_date(p_begin_dat, format_date_in);
+    l_end_dat := to_date(p_end_dat, format_date_in);
+
+    OPEN p_rc FOR
+      SELECT count(*) AS "size"
+      FROM (select r.id
+                FROM solution_lab.research   r
+                    ,solution_lab.order_info oi
+               WHERE oi.research_id = r.id
+               and r.patient_id = 1925388 -- p_patient_id
+               and r.root_id IS not NULL
+               and trunc(r.regdate) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat+1)
+               GROUP BY r.id
+                       ,r.specimen_id
+                       ,r.ids
+                       ,r.orderid
+                       ,r.regdate) v;
+  END get_lab_list_size;
+  
+/************************************/
+/*  Список ЛАБ анализов по пациенту */
+/************************************/
+  
+  PROCEDURE get_lab_list(p_patient_id IN NUMBER
+                              ,p_begin_dat   IN VARCHAR2
+                              ,p_end_dat     IN VARCHAR2
+                              ,p_start      IN NUMBER
+                              ,p_end        IN NUMBER
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+                              
+  l_begin_dat DATE;
+  l_end_dat   DATE;
+  BEGIN
+    l_begin_dat := to_date(p_begin_dat, format_date_in);
+    l_end_dat := to_date(p_end_dat, format_date_in);
+
+    OPEN p_rc FOR
+      SELECT v.*
+      FROM (
+      select ri.* ,rownum AS rnum
+              FROM (SELECT r.id as research_id
+                          ,listagg(fn_get_serv_name(oi.srvdep_id), ', ') within GROUP(ORDER BY r.id) AS srvtext
+                          ,(SELECT text
+                              FROM solution_lab.lu l
+                             WHERE l.tag = 1
+                               AND r.specimen_id = l.id) AS specimen_text
+                          ,r.ids AS ids
+                          ,r.regdate AS regdate
+                          ,to_char(r.regdate, format_date_front) AS regdate_str
+                          ,r.orderid AS order_num
+                      FROM solution_lab.research   r
+                          ,solution_lab.order_info oi
+                     WHERE oi.research_id = r.id
+                     and r.patient_id = p_patient_id
+                     and r.root_id IS not NULL
+                     and trunc(r.regdate) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat+1)
+                     GROUP BY r.id
+                             ,r.specimen_id
+                             ,r.ids
+                             ,r.orderid
+                             ,r.regdate) ri
+      Order by ri.regdate desc) v
+                       WHERE rnum BETWEEN p_start AND p_end ;
+  END get_lab_list;
+  
+  PROCEDURE count_research_patient (p_patient_id  IN NUMBER
+                                   ,p_research_id IN NUMBER
+                                   ,p_rc       IN OUT pkg_global.ref_cursor_type
+                                    ) AS
+     l_col  number;
+  BEGIN
+    select count(r.id) as col
+    into l_col
+    from solution_lab.research r
+    where (root_id = p_research_id or (id = p_research_id and root_id is not null))
+    -- and status in ('R', 'F','3')
+    and r.patient_id = p_patient_id;
+
+    OPEN p_rc FOR
+      SELECT p.num -- Номер карты в ЛПУ
+            ,g_make_first_upper(p.lastname) AS lastname -- Фамилия
+            ,g_make_first_upper(p.firstname) AS firstname -- Имя
+            ,g_make_first_upper(p.secondname) AS secondname -- Отчество
+            ,to_char(p.birthdate, 'dd.mm.yyyy') AS birthdateStr
+            ,p.phone -- Номер телефона
+            ,p.cellular -- Номер сотового телефона
+            ,p.note AS email -- e-mail/факс
+            ,p.snils   -- снилс ИНН
+            ,gsp_get_pat_address(p.keyid, 2) AS address_proj -- Адрес проживания
+            ,(SELECT count(PL.ID) FROM inetuser.patient_logon pl
+                 WHERE pl.status = 1
+                       AND pl.patient_id = p_patient_id
+                       AND pl.logon_name IS NOT NULL
+                       AND pl.pass  IS NOT NULL)  AS count_login
+             ,p.sex
+             , gsp_get_age_full_years(p.birthdate, SYSDATE) as age
+             , l_col as col
+        FROM patient p
+       WHERE p.keyid = p_patient_id;
+  END count_research_patient;
+
+
+  /**
+  * Список СЭМДов по Пациенту
+  * Параметры:
+    p_visit_id - Идентификатор Визита
+  **/
+  PROCEDURE get_semd_list_by_patient(p_patient_id IN NUMBER
+                                    ,p_begin_dat   IN VARCHAR2
+                                    ,p_end_dat     IN VARCHAR2
+                                    ,p_start      IN NUMBER
+                                    ,p_end        IN NUMBER
+                                    ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  l_begin_dat DATE;
+  l_end_dat   DATE;
+  BEGIN
+    l_begin_dat := to_date(p_begin_dat, format_date_in);
+    l_end_dat := to_date(p_end_dat, format_date_in);
+  
+    OPEN p_rc FOR
+      select fr.code, fr.text,
+       to_char(fr.dat, format_date_front) AS dat_str,
+       fr.status, fl.link_id as semd_id
+      from solution_reg.FORM_RESULT_IN fr
+      , solution_data.report_files_link fl
+      where fr.id = fl.link_id
+      and fr.tag =1
+      and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
+      and fr.link_id in (select v.keyid FROM visit v where v.patientid = p_patient_id)
+      Order by  fr.dat;
+  END get_semd_list_by_patient;
+                  
+  /**
+  * Список СЭМДов по Пациенту
+  * Параметры:
+    p_visit_id - Идентификатор Визита
+  **/
+  PROCEDURE get_semd_size_by_patient(p_patient_id IN NUMBER
+                                    ,p_begin_dat   IN VARCHAR2
+                                    ,p_end_dat     IN VARCHAR2
+                                    ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  l_begin_dat DATE;
+  l_end_dat   DATE;
+  BEGIN
+    l_begin_dat := to_date(p_begin_dat, format_date_in);
+    l_end_dat := to_date(p_end_dat, format_date_in);
+  
+    OPEN p_rc FOR
+      SELECT count(*) AS "size"
+      from solution_reg.FORM_RESULT_IN fr
+      , solution_data.report_files_link fl
+      where fr.id = fl.link_id
+      and fr.tag =1
+      and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
+      and fr.link_id in (select v.keyid FROM visit v where v.patientid = p_patient_id)
+      Order by  fr.dat;
+  END get_semd_size_by_patient;
+
+              
+                              
+                              
 END pkg_web_account_unique_7;

@@ -577,5 +577,110 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
   **/
   PROCEDURE get_semd_visit(p_doc_id IN NUMBER
                           ,p_rc       IN OUT pkg_global.ref_cursor_type);
+                          
+  /**
+  * Получение количества лабораторных заказов пациента
+  * Параметр: p_patient_id - идентификатор пациента
+  * p_begin_dat - начальная дата
+  * p_end_dat - конечная дата
+  **/
+  PROCEDURE lab_orders_size(p_patient_id IN NUMBER
+                              ,p_dat_from   IN DATE
+                              ,p_dat_to     IN DATE
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type);
+                          
+
+/* p_orderbyASC - сортировка 1 ASC, 0 DESC  */
+
+  PROCEDURE lab_orders(p_patient_id IN NUMBER
+                              ,p_dat_from   IN DATE
+                              ,p_dat_to     IN DATE
+                              ,p_start      IN NUMBER
+                              ,p_end        IN NUMBER
+                              ,p_orderbyASC IN NUMBER
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+  PROCEDURE get_lab_result(p_research_id IN NUMBER
+                          ,p_rc          IN OUT pkg_global.ref_cursor_type);
+                          
+  FUNCTION fn_last_test_result_value(p_test_res_id IN solution_lab.test_result.id%TYPE
+                                    ,p_patient_id  IN solution_lab.research.patient_id%TYPE
+                                    ,p_type        IN NUMBER) RETURN VARCHAR2;
+                          
+  /**
+  * Получение данных о файле лаб. заказа
+  * Параметры: p_patient_id - идентификатор пациента
+  *            p_research_id  - идентификатор лаб. заказа
+  **/
+
+  /** Процедура протестирована на данных из быза заказчика Олимп Здоровья (ru360002) **/
+
+  PROCEDURE get_lab_document_info(p_patient_id  IN NUMBER
+                                 ,p_research_id IN NUMBER
+                                 ,p_rc          IN OUT pkg_global.ref_cursor_type);
+                                 
+  PROCEDURE get_lab_document_file(p_patient_id  IN NUMBER
+                                 ,p_research_id IN NUMBER
+                                 ,p_file_id     IN NUMBER
+                                 ,p_file_type   IN VARCHAR2
+                                 ,p_rc          IN OUT pkg_global.ref_cursor_type);
+                                 
+
+  PROCEDURE get_lab_result_html (p_research_id IN NUMBER
+                                   ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  /*==========================================================================*/
+  /* Информация по всему заказу копия p_hist_html.get_lab_research_info*/
+  /*==========================================================================*/
+  PROCEDURE get_lab_research_info(p_research_id IN NUMBER
+                                 ,p_erase       IN NUMBER);
+                              
+/*****************************************/
+/*   Количество ЛАБ анализов по пациенту */
+/*****************************************/
+  PROCEDURE get_lab_list_size(p_patient_id IN NUMBER
+                              ,p_begin_dat  IN VARCHAR2
+                              ,p_end_dat    IN VARCHAR2
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type);
+                              
+
+/************************************/
+/*  Список ЛАБ анализов по пациенту */
+/************************************/
+  PROCEDURE get_lab_list(p_patient_id IN NUMBER
+                              ,p_begin_dat   IN VARCHAR2
+                              ,p_end_dat     IN VARCHAR2
+                              ,p_start      IN NUMBER
+                              ,p_end        IN NUMBER
+                              ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+/* Количество лаб анализов для проверки по пациенту */
+  PROCEDURE count_research_patient (p_patient_id  IN NUMBER
+                                   ,p_research_id IN NUMBER
+                                   ,p_rc       IN OUT pkg_global.ref_cursor_type
+                                    );
+                                    
+
+  /**
+  * Список СЭМДов по Пациенту
+  * Параметры:
+    p_visit_id - Идентификатор Визита
+  **/
+  PROCEDURE get_semd_list_by_patient(p_patient_id IN NUMBER
+                                    ,p_begin_dat   IN VARCHAR2
+                                    ,p_end_dat     IN VARCHAR2
+                                    ,p_start      IN NUMBER
+                                    ,p_end        IN NUMBER
+                                    ,p_rc       IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Список СЭМДов по Пациенту
+  * Параметры:
+    p_visit_id - Идентификатор Визита
+  **/
+  PROCEDURE get_semd_size_by_patient(p_patient_id IN NUMBER
+                                    ,p_begin_dat   IN VARCHAR2
+                                    ,p_end_dat     IN VARCHAR2
+                                    ,p_rc       IN OUT pkg_global.ref_cursor_type);
 
 END pkg_web_account_unique_7;
