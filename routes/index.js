@@ -177,8 +177,10 @@ app.use(require('./action'));          // Акции
 
 app.use(require('./semd'));            // СЭМДы
 
-app.use(require('./labs_new'));            // Лаб анализы
+app.use(require('./labs'));            // Лаб анализы
+// app.use(require('./labs_new'));            // Лаб анализы
 app.use(require('./reportServ'));      // Лаб анализы в PDF
+app.use(require('./seaman'));          // Моряки
 
 /*  временные ID вместо токена */
 app.get('/auth/id', global.acsToken, function (req, res) {
