@@ -111,13 +111,13 @@ app.get("/contract/patient/list/sig", global.acsToken, function(req,res) {
  *
  */
 
-app.get("/contract/patient/docpdf", function(req,res) {
-    let params = {p_patient_id: null, p_contract_id: null};
-// console.log('req.query=', req.query);
-    if (req.query && req.query.patientId && req.query.contractId) {
-        params.p_patient_id = req.query.patientId;
-        params.p_contract_id = req.query.contractId;
+app.get("/contract/patient/docpdf/:tmptoken/:id.pdf", global.acsTmpToken, function(req,res) {
+    let user = global.getAuthUserTmpToken(req);
 
+    let params = {p_patient_id: null, p_contract_id: null};
+    if (req.params && req.params['id'] && user && user.patient_id) {
+        params.p_patient_id = user.patient_id;
+        params.p_contract_id = req.params['id'];
         execute.executeRes(sql_contract_get_blob, params)
             .then(result => {
                 if (result && result[0] && result[0].BYTES){
