@@ -13,8 +13,11 @@ var htmlToPdf = require('html-pdf');
 
 const sql_get_semd_list_by_visit = "BEGIN "+cfg.db.packageName+".get_semd_list_by_visit(:visit_id, :cursor); END;";
 const sql_get_semd_visit = "BEGIN "+cfg.db.packageName+".get_semd_visit(:doc_id, :cursor); END;";
-const sql_get_semd_list_by_patient = "BEGIN "+cfg.db.packageName+".get_semd_list_by_patient(:p_patient_id, :p_begin_dat, :p_end_dat, :p_start, :p_end, :cursor); END;";
-const sql_get_semd_size_by_patient = "BEGIN "+cfg.db.packageName+".get_semd_size_by_patient(:p_patient_id, :p_begin_dat, :p_end_dat, :cursor); END;";
+const sql_get_semd_list_by_patient = "BEGIN "+cfg.db.packageName+".get_semd_list_by_patient(:p_patient_id, :p_begin_dat, :p_end_dat, :p_start, :p_end, :p_type, :cursor); END;";
+const sql_get_semd_size_by_patient = "BEGIN "+cfg.db.packageName+".get_semd_size_by_patient(:p_patient_id, :p_begin_dat, :p_end_dat, :p_type, :cursor); END;";
+const sql_get_semd = "BEGIN "+cfg.db.packageName+".get_semd(:doc_id, :p_owner, :p_table, :cursor); END;";
+const sql_get_exam_list_by_patient = "BEGIN "+cfg.db.packageName+".get_exam_list_by_patient(:p_patient_id, :p_begin_dat, :p_end_dat, :p_start, :p_end, :cursor); END;";
+const sql_get_exam_size_by_patient = "BEGIN "+cfg.db.packageName+".get_exam_size_by_patient(:p_patient_id, :p_begin_dat, :p_end_dat, :cursor); END;";
 
 
 const cookieParser = require('cookie-parser');
@@ -48,8 +51,60 @@ function get_doc(p_doc_id) {
     return  exeBd(sql_get_semd_visit, params)
 }
 
+/*  Информация о СЭМД в html*/
+function get_semd(p_doc_id, p_owner, p_table) {
+    let params = {doc_id: p_doc_id, p_owner: p_owner, p_table: p_table};
+    return  exeBd(sql_get_semd, params)
+}
 
+/*
+  Список инструментальных исследований
+*/
 
+app.get("/exam/patient/list", global.acsToken, (req,res) => {
+    let user = global.getAuthUser(req);
+    let params = {p_patient_id: user.patient_id, p_begin_dat: null, p_end_dat: null, p_start: null, p_end: null};
+
+    if (req.query && req.query.beginDate && req.query.endDate && req.query.start && req.query.end) {
+        params.p_begin_dat = req.query.beginDate;
+        params.p_end_dat = req.query.endDate;
+        params.p_start = req.query.start;
+        params.p_end = req.query.end;
+
+        execute.executeRes(sql_get_exam_list_by_patient, params)
+            .then(result => {
+                let r = format.assocArrayFromJSON(result);
+                res.json(format.getFormatRes(true, r, null));
+            })
+            .catch(err => {
+                res.json(format.getFormatRes(false, null, err));
+            });
+
+    } else {
+        res.json(format.getFormatRes(false, null, 'Not params'));
+    }
+});
+
+app.get("/exam/patient/size", global.acsToken, (req,res) => {
+    let user = global.getAuthUser(req);
+    let params = {p_patient_id: user.patient_id, p_begin_dat: null, p_end_dat: null};
+
+    if (req.query && req.query.beginDate && req.query.endDate) {
+        params.p_begin_dat = req.query.beginDate;
+        params.p_end_dat = req.query.endDate;
+        execute.executeRes(sql_get_exam_size_by_patient, params)
+            .then(result => {
+                let r = format.assocArrayFromJSON(result);
+                res.json(format.getFormatRes(true, r[0], null));
+            })
+            .catch(err => {
+                res.json(format.getFormatRes(false, null, err));
+            });
+
+    } else {
+        res.json(format.getFormatRes(false, null, 'Not params'));
+    }
+});
 
 /**
  * @api {get} /semd/list Список СЭМДов по визиту (TOKEN)
@@ -93,8 +148,68 @@ app.get("/semd/list", global.acsToken, (req,res) => {
 });
 
 /**
+ * @api {get} /semd/:owner/:table/:tmptoken/:id.pdf Описание посещения пациента PDF
+ * @apiGroup semd
+ * @apiVersion 0.0.1
+ *
+ *
+ * @apiParam {String} owner схема (solution_reg, SOLUTION_DIAGNOSTIC, ...)
+ * @apiParam {String} teable таблица (FORM_RESULT_IN, FORM_RESULT, ...)
+ * @apiParam {String} id  Идентификатор
+ *
+ *
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *  {
+ *   }
+ *
+ */
+
+app.get("/semd/:owner/:table/:tmptoken/:id.pdf", global.acsTmpToken, function(req,res) {
+//    console.log('+++++++TP=', req.params['tp']); // тип
+//    console.log('+++++++Id=', req.params['id']); // id
+    if (req.params && req.params['owner'] && req.params['table'] && req.params['id']) {
+        let l_id = req.params['id'];
+        let l_owner = req.params['owner'];
+        let l_table = req.params['table'];
+
+        get_semd(l_id, l_owner, l_table)
+            .then(resQ => {
+// console.log('!!! resQ=', resQ);
+                if (resQ && resQ.length>0) {
+                    let txt = '';
+                    resQ.forEach(item => {
+                        txt =  txt + item.file_clob;
+                    });
+
+                    htmlToPdf.create(txt).toStream(function(err, stream){
+                        if (err) {
+                            console.log('PDF ERROR =', err);
+                            logger.error('htmlToPdf ERR=' + JSON.stringify(err));
+                            getErrorHtml('Ошибка формирования заключения', 'Пожалуйста, обратитесь в регистратуру', res);
+                        } else {
+                            res.contentType('application/pdf');
+                            stream.pipe(res);
+                        }
+                    });
+
+                } else {
+                    getErrorHtml('Ошибка формирования заключения', 'Пожалуйста, обратитесь в регистратуру', res);
+                }
+            })
+            .catch(errQ => {
+                getErrorHtml('Ошибка формирования заключения', 'Пожалуйста, обратитесь в регистратуру', res);
+//                        res.json(format.getFormatRes(false, null, errQ));
+            });
+
+    } else {
+        getErrorHtml('Ошибка формирования заключения', 'Пожалуйста, обратитесь в регистратуру');
+    }
+});
+
+/**
  * @api {get} /semd/:tp/:id.pdf Описание посещения пациента PDF
- * @apiGroup history
+ * @apiGroup semd
  * @apiVersion 0.0.1
  *
  *
@@ -124,19 +239,6 @@ app.get("/semd/:tp/:tmptoken/:id.pdf", global.acsTmpToken, function(req,res) {
                     resQ.forEach(item => {
                         txt =  txt + item.file_clob;
                     });
-
-/*
-                    var html = '<!DOCTYPE html>\n' +
-                        '<html lang="en">\n' +
-                        '<head>\n' +
-                        '    <meta charset="UTF-8">\n' +
-                        '    <title>Консультация</title>\n' +
-                        '</head>\n' +
-                        '<body>\n' +
-                        txt +
-                        '</body>\n' +
-                        '</html>\n';
-*/
 
                     htmlToPdf.create(txt).toStream(function(err, stream){
                         if (err) {
@@ -195,13 +297,15 @@ app.get("/semd/test", global.acsToken, (req,res) => {
 
 app.get("/semd/patient/list", global.acsToken, (req,res) => {
     let user = global.getAuthUser(req);
-    let params = {p_patient_id: user.patient_id, p_begin_dat: null, p_end_dat: null, p_start: null, p_end: null};
+    let params = {p_patient_id: user.patient_id, p_begin_dat: null, p_end_dat: null, p_start: null, p_end: null, p_type: 1};
 
-    if (req.query && req.query.beginDate && req.query.endDate && req.query.start && req.query.end) {
+    if (req.query && req.query.beginDate && req.query.endDate && req.query.start && req.query.end && req.query.p_type) {
         params.p_begin_dat = req.query.beginDate;
         params.p_end_dat = req.query.endDate;
         params.p_start = req.query.start;
         params.p_end = req.query.end;
+        params.p_type = req.query.p_type;
+
         execute.executeRes(sql_get_semd_list_by_patient, params)
             .then(result => {
                 let r = format.assocArrayFromJSON(result);
@@ -235,11 +339,13 @@ app.get("/semd/patient/list", global.acsToken, (req,res) => {
 
 app.get("/semd/patient/list/size", global.acsToken, (req,res) => {
     let user = global.getAuthUser(req);
-    let params = {p_patient_id: user.patient_id, p_begin_dat: null, p_end_dat: null};
+    let params = {p_patient_id: user.patient_id, p_begin_dat: null, p_end_dat: null, p_type: 1};
 
-    if (req.query && req.query.beginDate && req.query.endDate) {
+    if (req.query && req.query.beginDate && req.query.endDate && req.query.p_type) {
         params.p_begin_dat = req.query.beginDate;
         params.p_end_dat = req.query.endDate;
+        params.p_type = req.query.p_type;
+
         execute.executeRes(sql_get_semd_size_by_patient, params)
             .then(result => {
                 let r = format.assocArrayFromJSON(result);

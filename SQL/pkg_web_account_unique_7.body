@@ -1,4 +1,3 @@
-
 CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
 
   PROCEDURE set_context_userid AS
@@ -4705,60 +4704,339 @@ and fr.link_id = v.keyid) AS count_files
   /**
   * Список СЭМДов по Пациенту
   * Параметры:
-    p_visit_id - Идентификатор Визита
+  * p_begin_dat - дата начала поиска
+  * p_end_dat - дата завершения поиска
+  * p_start - с какого элемента ведётся поиск (первый элемент - 1)
+  * p_end - по какой элемент ведётся поиск (включительно)
+  * p_type - тип документов (1- заключения, 2- профосмотры)
   **/
   PROCEDURE get_semd_list_by_patient(p_patient_id IN NUMBER
                                     ,p_begin_dat   IN VARCHAR2
                                     ,p_end_dat     IN VARCHAR2
                                     ,p_start      IN NUMBER
                                     ,p_end        IN NUMBER
+                                    ,p_type       IN NUMBER
                                     ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
   l_begin_dat DATE;
   l_end_dat   DATE;
   BEGIN
     l_begin_dat := to_date(p_begin_dat, format_date_in);
     l_end_dat := to_date(p_end_dat, format_date_in);
-  
-    OPEN p_rc FOR
-      select fr.code, fr.text,
-       to_char(fr.dat, format_date_front) AS dat_str,
-       fr.status, fl.link_id as semd_id
-      from solution_reg.FORM_RESULT_IN fr
-      , solution_data.report_files_link fl
-      where fr.id = fl.link_id
-      and fr.tag =1
-      and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
-      and fr.link_id in (select v.keyid FROM visit v where v.patientid = p_patient_id)
-      Order by  fr.dat;
+-- MedZKL_714 - не готов
+
+    CASE (p_type)
+        WHEN 1 THEN 
+          OPEN p_rc FOR
+            SELECT v.*
+            FROM (
+              select rownum AS rnum, fr.code, fr.text,
+             to_char(fr.dat, format_date_front) AS dat_str,
+             fr.status, fl.link_id as semd_id
+            from solution_reg.FORM_RESULT_IN fr
+            , solution_data.report_files_link fl
+            where fr.id = fl.link_id
+            and fr.tag =1
+            and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
+            and fr.link_id in (select v.keyid FROM visit v where v.patientid = p_patient_id)
+            and fr.code not in ('PROFPAT_CONCLUSION_old', '122_REMD_EGISZ_103')
+            Order by  fr.dat) v
+            WHERE rnum BETWEEN p_start AND p_end ;
+        WHEN 2 THEN 
+          OPEN p_rc FOR
+            SELECT v.*
+            FROM (
+              select rownum AS rnum, fr.code, fr.text,
+             to_char(fr.dat, format_date_front) AS dat_str,
+             fr.status, fl.link_id as semd_id
+            from solution_reg.FORM_RESULT_IN fr
+            , solution_data.report_files_link fl
+            where fr.id = fl.link_id
+            and fr.tag =1
+            and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
+            and fr.link_id in (select v.keyid FROM visit v where v.patientid = p_patient_id)
+            and fr.code in ('PROFPAT_CONCLUSION_old', '122_REMD_EGISZ_103')
+            Order by  fr.dat) v
+            WHERE rnum BETWEEN p_start AND p_end ;
+    END CASE;
   END get_semd_list_by_patient;
-                  
+  
   /**
-  * Список СЭМДов по Пациенту
+  * Список количества СЭМДов по Пациенту
   * Параметры:
-    p_visit_id - Идентификатор Визита
+  * p_type - тип документов (1- заключения, 2- профосмотры)
   **/
   PROCEDURE get_semd_size_by_patient(p_patient_id IN NUMBER
                                     ,p_begin_dat   IN VARCHAR2
                                     ,p_end_dat     IN VARCHAR2
+                                    ,p_type       IN NUMBER
                                     ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
   l_begin_dat DATE;
   l_end_dat   DATE;
   BEGIN
     l_begin_dat := to_date(p_begin_dat, format_date_in);
     l_end_dat := to_date(p_end_dat, format_date_in);
+
+    CASE (p_type)
+        WHEN 1 THEN 
+          OPEN p_rc FOR
+            SELECT count(*) AS "size"
+            from solution_reg.FORM_RESULT_IN fr
+            , solution_data.report_files_link fl
+            where fr.id = fl.link_id
+            and fr.tag =1
+            and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
+            and fr.link_id in (select v.keyid FROM visit v where v.patientid = p_patient_id)
+            and fr.code not in ('PROFPAT_CONCLUSION_old', '122_REMD_EGISZ_103')
+            Order by  fr.dat;
+        
+        WHEN 2 THEN 
+          OPEN p_rc FOR
+            SELECT count(*) AS "size"
+            from solution_reg.FORM_RESULT_IN fr
+            , solution_data.report_files_link fl
+            where fr.id = fl.link_id
+            and fr.tag =1
+            and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
+            and fr.link_id in (select v.keyid FROM visit v where v.patientid = p_patient_id)
+            and fr.code in ('PROFPAT_CONCLUSION_old', '122_REMD_EGISZ_103')
+            Order by  fr.dat;
+        
+    END CASE;
   
-    OPEN p_rc FOR
-      SELECT count(*) AS "size"
-      from solution_reg.FORM_RESULT_IN fr
-      , solution_data.report_files_link fl
-      where fr.id = fl.link_id
-      and fr.tag =1
-      and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
-      and fr.link_id in (select v.keyid FROM visit v where v.patientid = p_patient_id)
-      Order by  fr.dat;
   END get_semd_size_by_patient;
 
-              
+
+  /**
+  * Пациент является моряком
+  * Параметры:
+    p_patient_id - Идентификатор 
+  **/
+  PROCEDURE get_patient_is_seaman(p_patient_id IN NUMBER
+                                 ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+      OPEN p_rc FOR
+        SELECT count(e.keyid) as seaman_col
+        from solution_med.exam e, solution_med.patient_exam pe
+        where e.group_id in (25, 51, 43)
+        and pe.examid = e.keyid
+        and pe.patientid = p_patient_id;
+  END get_patient_is_seaman;
+
+/************ */
+
+/* Добавить документ в БД */
+  PROCEDURE document_add(p_patient_id  IN NUMBER
+                        ,p_file_name   IN VARCHAR2
+                        ,p_doc_type_id IN NUMBER
+                        ,p_blob        IN BLOB
+                        ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+
+    l_result_rec pkg_global.result_rtype;
+
+  BEGIN
+      --Сохранение документа на пациенте
+    l_result_rec.identity := pkg_global.get_next_id('SOLUTION_DATA', 'DOCUMENTS');
+
+    INSERT INTO solution_data.documents
+      (id
+      ,tag
+      ,NAME
+      ,link_id
+      ,patient_id
+      ,content
+      ,status
+      ,store_status
+      ,type_id)
+    VALUES
+      (l_result_rec.identity
+      ,7
+      ,p_file_name
+      ,p_patient_id
+      ,p_patient_id
+      ,p_blob
+      ,1
+      ,-1
+      ,p_doc_type_id);
+
+
+    OPEN p_rc FOR
+      SELECT l_result_rec.identity AS id
+            ,pkg_global.err_no AS err_code
+            ,'Документ успешно сохранен!' err_text
+        FROM dual;
+
+  END document_add;
+
+/* Добавить документ в БД с типом телемедконференция */
+  PROCEDURE document_add_trueconf(p_patient_id  IN NUMBER
+                                 ,p_file_name   IN VARCHAR2
+                                 ,p_link_id     IN NUMBER
+                                 ,p_blob        IN BLOB
+                                 ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+
+    l_result_rec pkg_global.result_rtype;
+  BEGIN
+      --Сохранение документа на пациенте
+    l_result_rec.identity := pkg_global.get_next_id('SOLUTION_DATA', 'DOCUMENTS');
+
+    INSERT INTO solution_data.documents
+      (id
+      ,tag
+      ,NAME
+      ,link_id
+      ,patient_id
+      ,content
+      ,status
+      ,store_status
+      ,type_id)
+    VALUES
+      (l_result_rec.identity
+      ,7
+      ,p_file_name
+      ,p_link_id
+      ,p_patient_id
+      ,p_blob
+      ,1
+      ,-1
+      ,doc_type_trueconf);
+
+    OPEN p_rc FOR
+      SELECT l_result_rec.identity AS id
+            ,pkg_global.err_no AS err_code
+            ,'Документ успешно сохранен!' err_text
+        FROM dual;
+
+  END document_add_trueconf;
+
+
+/* получить список документов */
+  PROCEDURE get_documents(p_patient_id  IN NUMBER
+                         ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+     OPEN p_rc FOR
+          SELECT d.id
+          ,to_char(d.createdate, format_date_front) dat_str
+          , pkg_data.fn_get_document_origin_info(d.tag, d.link_id, d.type_id) AS text
+          , d.name AS file_name
+--          , d.content
+          FROM solution_data.documents d
+          WHERE d.patient_id = p_patient_id
+          AND d.type_id != 90952237594;
+
+  END get_documents;
+
+
+/* Получить список типов документов */
+  PROCEDURE get_list_types_document(p_rc          IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+    SELECT keyid
+            ,text
+        FROM (SELECT l.keyid
+                    ,l.text
+                    ,l.sortcode
+                FROM lu l
+               WHERE l.tag = 327
+                 AND l.rootcode = 7
+                 AND (l.status = 1)
+                 AND l.keyid <> doc_type_trueconf -- Кроме прикрепления к телемед
+               ORDER BY l.sortcode) t;
+
+  END get_list_types_document;
+
+  /* Получение содержимого подписанного договора */
+  PROCEDURE get_doc_blob(p_patient_id  IN NUMBER
+                        ,p_doc_id      IN NUMBER
+                        ,p_file_name   IN VARCHAR2
+                        ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      SELECT content AS bytes
+        FROM solution_data.documents d
+       WHERE d.id = p_doc_id
+       AND d.patient_id = p_patient_id
+       AND d.name = p_file_name;
+
+  END get_doc_blob;
+  
                               
+  /**
+  * Получение СЭМДа по параметрам
+  **/
+  PROCEDURE get_semd(p_doc_id  IN NUMBER
+                    ,p_owner   IN VARCHAR2
+                    ,p_table   IN VARCHAR2
+                    ,p_rc      IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    pkg_remd_egisz.get_all_cda_formatted_clob(p_owner => p_owner,
+                                              p_table => p_table,
+                                              p_document_id => p_doc_id,
+                                              p_rc => p_rc);
+  END get_semd;
+
+  /**
+  * Список Инструментальных исследований по Пациенту
+  * Параметры:
+  * p_begin_dat - дата начала поиска
+  * p_end_dat - дата завершения поиска
+  * p_start - с какого элемента ведётся поиск (первый элемент - 1)
+  * p_end - по какой элемент ведётся поиск (включительно)
+  **/
+  PROCEDURE get_exam_list_by_patient(p_patient_id IN NUMBER
+                                    ,p_begin_dat          IN VARCHAR2
+                                    ,p_end_dat            IN VARCHAR2
+                                    ,p_start              IN NUMBER
+                                    ,p_end                IN NUMBER
+                                    ,p_rc                 IN OUT pkg_global.ref_cursor_type) AS
+  l_begin_dat DATE;
+  l_end_dat   DATE;
+  BEGIN
+    l_begin_dat := to_date(p_begin_dat, format_date_in);
+    l_end_dat := to_date(p_end_dat, format_date_in);
+    
+          OPEN p_rc FOR
+            SELECT v.*
+            FROM (
+              select rownum AS rnum, fr.text, 
+              to_char(fr.dat, format_date_front) AS dat_str,
+              imrl.link_id as semd_id
+              from inetuser.iemk_med_record_links imrl
+              , SOLUTION_DIAGNOSTIC.FORM_RESULT fr
+              where imrl.patient_id = p_patient_id
+              and imrl.link_id = fr.id
+              and fr.status = 1
+              and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
+              Order by  fr.dat) v
+            WHERE rnum BETWEEN p_start AND p_end ;
+  END get_exam_list_by_patient;
+
+  /**
+  * Размер списока Инструментальных исследований по Пациенту
+  * Параметры:
+  * p_begin_dat - дата начала поиска
+  * p_end_dat - дата завершения поиска
+  * p_start - с какого элемента ведётся поиск (первый элемент - 1)
+  * p_end - по какой элемент ведётся поиск (включительно)
+  **/
+  PROCEDURE get_exam_size_by_patient(p_patient_id IN NUMBER
+                                    ,p_begin_dat          IN VARCHAR2
+                                    ,p_end_dat            IN VARCHAR2
+                                    ,p_rc                 IN OUT pkg_global.ref_cursor_type) AS
+  l_begin_dat DATE;
+  l_end_dat   DATE;
+  BEGIN
+    l_begin_dat := to_date(p_begin_dat, format_date_in);
+    l_end_dat := to_date(p_end_dat, format_date_in);
+    
+          OPEN p_rc FOR
+              SELECT count(*) AS "size"
+              from inetuser.iemk_med_record_links imrl
+              , SOLUTION_DIAGNOSTIC.FORM_RESULT fr
+              where imrl.patient_id = p_patient_id
+              and imrl.link_id = fr.id
+              and fr.status = 1
+              and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
+              Order by  fr.dat;
+  END get_exam_size_by_patient;
                               
 END pkg_web_account_unique_7;

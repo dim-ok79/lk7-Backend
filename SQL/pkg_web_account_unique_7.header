@@ -72,6 +72,8 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
   
 -- Почта для платежей, пациент без почты
   pay_params_email_def VARCHAR2(100) := 'cheque@med122.ru';
+
+  doc_type_trueconf  CONSTANT NUMBER := 90718355; -- Код типа документа для телемедицины
   
   
   TYPE r_docdep IS RECORD(
@@ -664,23 +666,100 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
   /**
   * Список СЭМДов по Пациенту
   * Параметры:
-    p_visit_id - Идентификатор Визита
+  * p_begin_dat - дата начала поиска
+  * p_end_dat - дата завершения поиска
+  * p_start - с какого элемента ведётся поиск (первый элемент - 1)
+  * p_end - по какой элемент ведётся поиск (включительно)
+  * p_type - тип документов (1- заключения, 2- профосмотры)
   **/
   PROCEDURE get_semd_list_by_patient(p_patient_id IN NUMBER
                                     ,p_begin_dat   IN VARCHAR2
                                     ,p_end_dat     IN VARCHAR2
                                     ,p_start      IN NUMBER
                                     ,p_end        IN NUMBER
+                                    ,p_type       IN NUMBER
                                     ,p_rc       IN OUT pkg_global.ref_cursor_type);
 
   /**
-  * Список СЭМДов по Пациенту
+  * Список количества СЭМДов по Пациенту
   * Параметры:
-    p_visit_id - Идентификатор Визита
+  * p_type - тип документов (1- заключения, 2- профосмотры)
   **/
   PROCEDURE get_semd_size_by_patient(p_patient_id IN NUMBER
                                     ,p_begin_dat   IN VARCHAR2
                                     ,p_end_dat     IN VARCHAR2
+                                    ,p_type       IN NUMBER
                                     ,p_rc       IN OUT pkg_global.ref_cursor_type);
+  /**
+  * Пациент является моряком
+  * Параметры:
+    p_patient_id - Идентификатор 
+  **/
+  PROCEDURE get_patient_is_seaman(p_patient_id IN NUMBER
+                                 ,p_rc       IN OUT pkg_global.ref_cursor_type);
+                                    
+/* Добавить документ в БД */
+  PROCEDURE document_add(p_patient_id  IN NUMBER
+                        ,p_file_name   IN VARCHAR2
+                        ,p_doc_type_id IN NUMBER
+                        ,p_blob        IN BLOB
+                        ,p_rc          IN OUT pkg_global.ref_cursor_type);
+                        
+/* Добавить документ в БД с типом телемедконференция */
+  PROCEDURE document_add_trueconf(p_patient_id  IN NUMBER
+                                 ,p_file_name   IN VARCHAR2
+                                 ,p_link_id     IN NUMBER
+                                 ,p_blob        IN BLOB
+                                 ,p_rc          IN OUT pkg_global.ref_cursor_type);
+                                 
+/* получить список документов */
+  PROCEDURE get_documents(p_patient_id  IN NUMBER
+                         ,p_rc          IN OUT pkg_global.ref_cursor_type);
+                                 
+/* Получить список типов документов */
+  PROCEDURE get_list_types_document(p_rc          IN OUT pkg_global.ref_cursor_type);
+  
+  /* Получение содержимого подписанного договора */
+  PROCEDURE get_doc_blob(p_patient_id  IN NUMBER
+                        ,p_doc_id      IN NUMBER
+                        ,p_file_name   IN VARCHAR2
+                        ,p_rc          IN OUT pkg_global.ref_cursor_type);
+  
+  /**
+  * Получение СЭМДа по параметрам
+  **/
+  PROCEDURE get_semd(p_doc_id  IN NUMBER
+                    ,p_owner   IN VARCHAR2
+                    ,p_table   IN VARCHAR2
+                    ,p_rc      IN OUT pkg_global.ref_cursor_type);
+                        
+  /**
+  * Список Инструментальных исследований по Пациенту
+  * Параметры:
+  * p_begin_dat - дата начала поиска
+  * p_end_dat - дата завершения поиска
+  * p_start - с какого элемента ведётся поиск (первый элемент - 1)
+  * p_end - по какой элемент ведётся поиск (включительно)
+  **/
+  PROCEDURE get_exam_list_by_patient(p_patient_id IN NUMBER
+                                    ,p_begin_dat          IN VARCHAR2
+                                    ,p_end_dat            IN VARCHAR2
+                                    ,p_start              IN NUMBER
+                                    ,p_end                IN NUMBER
+                                    ,p_rc                 IN OUT pkg_global.ref_cursor_type);
+                                    
+  /**
+  * Размер списока Инструментальных исследований по Пациенту
+  * Параметры:
+  * p_begin_dat - дата начала поиска
+  * p_end_dat - дата завершения поиска
+  * p_start - с какого элемента ведётся поиск (первый элемент - 1)
+  * p_end - по какой элемент ведётся поиск (включительно)
+  **/
+  PROCEDURE get_exam_size_by_patient(p_patient_id IN NUMBER
+                                    ,p_begin_dat          IN VARCHAR2
+                                    ,p_end_dat            IN VARCHAR2
+                                    ,p_rc                 IN OUT pkg_global.ref_cursor_type);
+                                    
 
 END pkg_web_account_unique_7;
