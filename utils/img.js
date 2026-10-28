@@ -16,7 +16,7 @@ const sql_get_doc_photo_blob = "BEGIN "+cfg.db.packageName+".get_doc_photo_blob(
 
 let params = null;
 let statusJOB = false;
-const folderDoc = 'static/doc/';
+const folderDoc = 'static\\doc\\';
 let pathDoc = '';
 
 class img {
@@ -34,7 +34,7 @@ class img {
     getDir() {
         // TODO: проверить на Linux
         let path = process.cwd();
-        return path + '/';
+        return path + '\\';
     }
 
 // Обработка

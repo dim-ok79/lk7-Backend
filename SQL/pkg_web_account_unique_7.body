@@ -5038,5 +5038,42 @@ and fr.link_id = v.keyid) AS count_files
               and trunc(fr.dat) BETWEEN trunc(l_begin_dat) AND trunc(l_end_dat)
               Order by  fr.dat;
   END get_exam_size_by_patient;
-                              
+
+/** Получение списка фотографий докторов для сохранения JOB 
+  * Параметры:
+  * p_label - префикс фотографий в БД
+*/
+  PROCEDURE get_doc_list_img(p_label   IN VARCHAR2
+                            ,p_rc      IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      SELECT d.linkid,
+             db.keyid,
+             doc.firstname || ' ' || doc.lastname || ' ' || doc.secondname AS fio_doc,
+             db.file_size AS db_file_size -- Размер файла в БД
+      FROM document      d
+          ,document_body db
+          ,doctor        doc
+      WHERE d.tag = 10
+--       AND d.linkid = p_doctorid --'1613000'
+       AND db.documentid = d.keyid
+       AND doc.keyid = d.linkid
+--       AND d.text LIKE '%' || p_label || '%' ; -- '%main_photo%';
+       AND d.text =  p_label ; -- '%main_photo%';
+  END get_doc_list_img;
+          
+  /**
+  * Фотография врача
+  * p_db_keyid - идентификатор документа
+  */
+  PROCEDURE get_doc_photo_blob(p_db_keyid IN NUMBER
+                              ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+      OPEN p_rc FOR
+        SELECT db.text AS bytes
+          FROM document_body db
+         WHERE db.keyid = p_db_keyid;
+
+  END get_doc_photo_blob;
+                      
 END pkg_web_account_unique_7;

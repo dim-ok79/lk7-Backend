@@ -761,5 +761,18 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
                                     ,p_end_dat            IN VARCHAR2
                                     ,p_rc                 IN OUT pkg_global.ref_cursor_type);
                                     
+/** Получение списка фотографий докторов для сохранения JOB 
+  * Параметры:
+  * p_label - префикс фотографий в БД
+*/
+  PROCEDURE get_doc_list_img(p_label   IN VARCHAR2
+                            ,p_rc      IN OUT pkg_global.ref_cursor_type);
+
+  /**
+  * Фотография врача
+  * p_db_keyid - идентификатор документа
+  */
+  PROCEDURE get_doc_photo_blob(p_db_keyid IN NUMBER
+                              ,p_rc       IN OUT pkg_global.ref_cursor_type);
 
 END pkg_web_account_unique_7;

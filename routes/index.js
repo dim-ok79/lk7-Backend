@@ -6,6 +6,8 @@ const format = require("../utils/format");
 const tmptoken = require('../utils/tmptoken');
 let TmpTokenArray = new tmptoken(10); // Время жизни 10 секеунд
 
+const c_img = require("../utils/img");
+
 
 const app = express();
 const logger = require('../utils/logger')('R-Index');
@@ -209,6 +211,44 @@ app.use((req, res, next) => {
     });
 });
 
+// IMG JOB
+if (cfg.img) {
+    logger.info('cfg.img=' + JSON.stringify(cfg.img));
+    const img = new c_img.img(cfg.img);
+    if (cfg.img && cfg.img.job_interval_m && cfg.img.job_interval_m>0){
+        // Работаем по таймауту
+        setInterval(() => {
+            const dt = new Date();
+            console.log(`JOBBB time ${dt.getHours()} : ${dt.getMinutes()}`);
+            logger.info('Start ListDocImg=' + JSON.stringify(cfg.img));
+            img.JOB$()
+                .then(resList => {
+                    logger.info('JOBDocImg res=' + JSON.stringify(resList));
+//                    console.log('JOBDocImg res=', resList);
+                })
+                .catch(errList => {
+                    logger.error('JOBDocImg err=' + JSON.stringify(errList));
+                });
+        }, cfg.img.job_interval_m * 1000 * 60);
+    } else {
+        // Работаем по часам
+        setInterval(() => {
+            const dt = new Date();
+            console.log(`JOBBB time ${dt.getHours()} : ${dt.getMinutes()}`);
+            if (cfg.img.job_start_time_h == dt.getHours() && cfg.img.job_start_time_m == dt.getMinutes()) {
+                logger.info('Start ListDocImg=' + JSON.stringify(cfg.img));
+                img.JOB$()
+                    .then(resList => {
+                        logger.info('JOBDocImg res=' + JSON.stringify(resList));
+//                    console.log('JOBDocImg res=', resList);
+                    })
+                    .catch(errList => {
+                        logger.error('JOBDocImg err=' + JSON.stringify(errList));
+                    });
+            }
+        }, 1 * 1000 * 60/4);
+    }
+}
 
 
 module.exports = app;
