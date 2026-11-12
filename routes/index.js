@@ -184,6 +184,7 @@ app.use(require('./labs'));            // Лаб анализы
 app.use(require('./reportServ'));      // Лаб анализы в PDF
 app.use(require('./seaman'));          // Моряки
 app.use(require('./file_upload'));     // Файлы - Документы
+app.use(require('./rate'));       // Оценка врачей
 
 /*  временные ID вместо токена */
 app.get('/auth/id', global.acsToken, function (req, res) {

@@ -1015,28 +1015,10 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
             ,v.sortcode
             ,v.dep_name
             ,v.count_files
-/*            
-            ,CASE
-               WHEN EXISTS (SELECT 1
-                       FROM docdep dd
-                           ,TABLE(valid_docdep_lpu(p_root_dep_ids => to_char(get_dep_root_id_by_dep_id(dd.depid))
-                                                            ,p_spec_id      => dd.specid
-                                                            ,p_doc_id       => dd.docid
-                                                            ,p_srv_ids      => NULL
-                                                            ,p_patient_id   => p_patient_id)) dd1
-                           ,TABLE(valid_rnumb(p_docdep_id  => dd1.docdepid
-                                                           ,p_dat_from   => l_begin_dat
-                                                           ,p_dat_to     => l_end_dat --SYSDATE + l_param
-                                                           ,p_patient_id => p_patient_id
-                                                           ,p_rectype => null)) rn
-                      WHERE dd.keyid = v.docid_exec
-                        AND rn.docdepid = dd1.docdepid) THEN
-                1
-               ELSE
-                0
-             END AS sched_exists_for_dd_on_visit
-*/
-, 0 AS sched_exists_for_dd_on_visit             
+            , 0 AS sched_exists_for_dd_on_visit             
+            , rate.RATE_COUNT
+            , rate.RATE_TEXT
+
         FROM (SELECT t.*
                     ,rownum AS rnum
                 FROM (SELECT tt.*
@@ -1068,14 +1050,14 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
                                        d.keyid = dd.depid) AS dep_name
                                     ,v.doctorid AS docid_exec
                                     ,(select count(f.id)
-from solution_data.report_files f
-, solution_data.report_files_link fl
-, solution_reg.FORM_RESULT_IN fr
-where fl.report_files_id = f.id
-and fl.table_name = 'FORM_RESULT_IN'
-and fr.id = fl.link_id
-and fr.tag =1
-and fr.link_id = v.keyid) AS count_files
+                                        from solution_data.report_files f
+                                        , solution_data.report_files_link fl
+                                        , solution_reg.FORM_RESULT_IN fr
+                                        where fl.report_files_id = f.id
+                                        and fl.table_name = 'FORM_RESULT_IN'
+                                        and fr.id = fl.link_id
+                                        and fr.tag =1
+                                        and fr.link_id = v.keyid) AS count_files
                                 FROM visit v
                                 JOIN docdep dd
                                   ON dd.keyid = v.doctorid
@@ -1136,6 +1118,8 @@ and fr.link_id = v.keyid) AS count_files
                        ORDER BY tt.dat DESC
                                ,tt.sortcode
                                ,tt.keyid) t) v
+              LEFT JOIN inetuser.web_rate rate 
+              ON rate.VISIT_KEYID = v.keyid AND rate.typehistory = v.typehistory
        WHERE v.rnum <= p_end
          AND rnum >= p_start;
 
@@ -5075,5 +5059,56 @@ and fr.link_id = v.keyid) AS count_files
          WHERE db.keyid = p_db_keyid;
 
   END get_doc_photo_blob;
+
+/** Добавление оценки врача
+    ,p_visit_keyid  IN NUMBER
+    ,p_doctorid  IN NUMBER
+    ,p_specid  IN NUMBER
+    ,p_rate_count   - количество звезд
+    ,p_rate_text   - информация
+*/
+  PROCEDURE add_rate( p_patient_id    IN NUMBER
+                      ,p_visit_keyid  IN NUMBER
+                      ,p_doctorid  IN NUMBER
+                      ,p_specid  IN NUMBER
+                      ,p_typehistory IN VARCHAR2
+                      ,p_rate_count  IN NUMBER
+                      ,p_rate_text   IN VARCHAR2
+                      ,p_rc          IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+  
+    INSERT INTO inetuser.web_rate
+            (id
+            ,VISIT_KEYID
+            ,DOCTORID
+            ,SPECID
+            ,TYPEHISTORY
+            ,PATIENT_ID
+            ,RATE_COUNT
+            ,RATE_TEXT
+            )
+          VALUES
+            (pkg_global.get_next_id('INETUSER', 'WEB_RATE')
+            ,p_visit_keyid
+            ,p_doctorid
+            ,p_specid
+            ,p_typehistory
+            ,p_patient_id
+            ,p_rate_count
+            ,p_rate_text
+            );
+    OPEN p_rc FOR
+      SELECT 0 AS err_code
+            ,'' AS err_text
+        FROM dual;
+            
+    EXCEPTION
+      WHEN OTHERS THEN
+        OPEN p_rc FOR
+          SELECT pkg_global.err_crit     AS err_code
+                ,'Ошибка получения номерков.' AS err_text
+            FROM dual;
+      
+  END add_rate;
                       
 END pkg_web_account_unique_7;

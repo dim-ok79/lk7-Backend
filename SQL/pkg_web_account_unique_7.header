@@ -775,4 +775,23 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
   PROCEDURE get_doc_photo_blob(p_db_keyid IN NUMBER
                               ,p_rc       IN OUT pkg_global.ref_cursor_type);
 
+/** Добавление оценки врача
+    ,p_visit_keyid  IN NUMBER
+    ,p_doctorid  IN NUMBER
+    ,p_specid  IN NUMBER
+    ,p_rate_count   - количество звезд
+    ,p_rate_text   - информация
+*/
+  PROCEDURE add_rate( p_patient_id    IN NUMBER
+                      ,p_visit_keyid  IN NUMBER
+                      ,p_doctorid  IN NUMBER
+                      ,p_specid  IN NUMBER
+                      ,p_typehistory IN VARCHAR2
+                      ,p_rate_count  IN NUMBER
+                      ,p_rate_text   IN VARCHAR2
+                      ,p_rc          IN OUT pkg_global.ref_cursor_type);
+                      
+                      
+                      
+
 END pkg_web_account_unique_7;
