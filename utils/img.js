@@ -45,17 +45,26 @@ class img {
             this.getListDocImg$(params.prefix_doc_photo)
                 .then(res1 => {
                     let r = format.assocArrayFromJSON(res1);
-                    console.log('1) Doc list full =', r);
+/*
+                    console.log('1) Doc list full =');
+                    console.table(r);
+*/
                     resJOB = r;
 // 2) Отфильтровать по размеру
                     return this.getFiltrDocImg$(r);
                 })
                 .then(resF => {  // Результат после фильтра
 // 3) Выгрузить фоток в файлы
-                    console.log('2) resF=', resF);
+/*
+                    console.log('2) resF=');
+                    console.table(resF);
+*/
                     this.saveFiles$(resF)
                         .then( resSF => {
-                            console.log('saveFiles$ res=', resSF);
+/*
+                            console.log('saveFiles$ res=');
+                            console.table(resSF);
+*/
                             resolve(resSF);
                         })
                         .catch(errSF => {
@@ -177,7 +186,10 @@ class img {
 *!/
                     }); // ARRAY
 */
-console.log('END arrData=', arrData)
+/*
+                    console.log('END saveFiles$ arrData=');
+                    console.table(arrData);
+*/
                     resolve(arrData);
                 })
                 .catch(err => {

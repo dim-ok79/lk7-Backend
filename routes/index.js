@@ -224,7 +224,8 @@ if (cfg.img) {
             logger.info('Start ListDocImg=' + JSON.stringify(cfg.img));
             img.JOB$()
                 .then(resList => {
-                    logger.info('JOBDocImg res=' + JSON.stringify(resList));
+                    logger.info('JOBDocImg res=');
+                    console.table(resList)
 //                    console.log('JOBDocImg res=', resList);
                 })
                 .catch(errList => {
@@ -240,7 +241,8 @@ if (cfg.img) {
                 logger.info('Start ListDocImg=' + JSON.stringify(cfg.img));
                 img.JOB$()
                     .then(resList => {
-                        logger.info('JOBDocImg res=' + JSON.stringify(resList));
+                        logger.info('JOBDocImg res=');
+                        console.table(resList)
 //                    console.log('JOBDocImg res=', resList);
                     })
                     .catch(errList => {
