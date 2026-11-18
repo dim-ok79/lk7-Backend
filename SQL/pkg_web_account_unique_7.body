@@ -2264,7 +2264,7 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
                                                         p_lpu_id      => NULL)) d1
             ,TABLE(valid_rnumb(p_docdep_id  => d1.docdepid
                                               ,p_dat_from   => sysdate
-                                              ,p_dat_to     => sysdate + 30
+                                              ,p_dat_to     => sysdate + 40
                                               ,p_spec_id    => null
                                               ,p_stac_id    => null
                                               ,p_patient_id => null -- p_patient_id -- NULL
@@ -5110,5 +5110,408 @@ CREATE OR REPLACE PACKAGE BODY pkg_web_account_unique_7 IS
             FROM dual;
       
   END add_rate;
-                      
+  
+-- PKG_WS_PAY
+    PROCEDURE add_order_by_payment_total(p_payment_total_id    IN payment_total.keyid%TYPE
+                                      ,p_phone_to_send_check IN VARCHAR2
+                                      ,p_email_to_send_check IN VARCHAR2
+                                      ,p_return_url          IN VARCHAR2
+                                      ,p_online_payment      IN NUMBER
+                                      ,p_rc                  IN OUT pkg_global.ref_cursor_type) AS
+    l_result_rec        pkg_global.result_rtype;
+    l_payment_total_row payment_total%ROWTYPE;
+    l_main_order_row    inetuser.ws_pay_order%ROWTYPE;
+    l_is_return         NUMBER := 0;
+    l_order_id          inetuser.ws_pay_order.id%TYPE;
+  BEGIN
+    SELECT pt.*
+      INTO l_payment_total_row
+      FROM payment_total pt
+     WHERE pt.keyid = p_payment_total_id;
+
+    SELECT MAX(po.id)
+      INTO l_result_rec.identity
+      FROM inetuser.ws_pay_order po
+     WHERE po.payment_total_id = l_payment_total_row.keyid
+       AND nvl(po.status, 0) <> 2;
+
+    IF l_result_rec.identity > 0 THEN
+      SELECT MAX(wpp.order_id)
+        INTO l_order_id
+        FROM inetuser.ws_pay_payment wpp
+       WHERE wpp.order_id = l_result_rec.identity;
+
+      IF l_order_id > 0 THEN
+        l_result_rec.error_code := pkg_global.err_crit;
+        l_result_rec.error_text := 'Платеж уже создан! Обновите данные.';
+      ELSE
+        pkg_global.fill_result_cursor(l_result_rec, p_rc);
+        RETURN;
+      END IF;
+    END IF;
+
+    IF p_pay.is_pay_type_in_group(pf_lu.get_code(l_payment_total_row.luid), 'ALL', 'RETURN') = 1
+       AND l_result_rec.error_code <> pkg_global.err_crit THEN
+
+      l_is_return := 1;
+
+      BEGIN
+        SELECT po.*
+          INTO l_main_order_row
+          FROM inetuser.ws_pay_order po
+              ,payment_total         pt
+         WHERE pt.keyid = l_payment_total_row.rootid
+           AND po.payment_total_id = pt.keyid
+           AND rownum = 1;
+      EXCEPTION
+        WHEN OTHERS THEN
+          NULL;
+      END;
+
+      IF l_main_order_row.id IS NULL THEN
+        l_result_rec.error_code := pkg_global.err_crit;
+        l_result_rec.error_text := 'Вернуть платеж онлайн можно только если основной платеж был оплачен онлайн.';
+      END IF;
+    END IF;
+
+    IF l_result_rec.error_code <> pkg_global.err_crit THEN
+      l_result_rec.identity := pkg_global.get_next_id('INETUSER', 'WS_PAY_ORDER');
+      INSERT INTO inetuser.ws_pay_order
+        (id
+        ,dat
+        ,root_id
+        ,order_source
+        ,payment_total_id
+        ,status
+        ,amount
+        ,currency
+        ,order_description
+        ,phone_to_send_check
+        ,email_to_send_check
+        ,return_url
+        ,is_return
+        ,online_payment)
+        (SELECT l_result_rec.identity
+               ,SYSDATE
+               ,l_main_order_row.id
+               ,NULL -- обновится после создания платежа в платежной системе
+               ,l_payment_total_row.keyid
+               ,0
+               ,l_payment_total_row.amount
+               ,pkg_ws_pay.c_currency()
+               ,CASE
+                  WHEN l_is_return = 1 THEN
+                   'Возврат заказа №' || nvl(l_payment_total_row.check_code, to_char(l_result_rec.identity))
+                  ELSE
+                   'Оплата заказа №' || nvl(l_payment_total_row.check_code, to_char(l_result_rec.identity))
+                END /* "Оплата заказа № 72 для user@yandex.ru" */
+               ,nvl(p_phone_to_send_check, l_main_order_row.phone_to_send_check)
+               ,nvl(p_email_to_send_check, l_main_order_row.email_to_send_check)
+               ,p_return_url
+               ,l_is_return
+               ,p_online_payment
+           FROM dual);
+    END IF;
+
+    pkg_global.fill_result_cursor(l_result_rec, p_rc);
+  END add_order_by_payment_total;
+  
+  /**
+  * Оплата отложенного платежа
+  */
+  PROCEDURE payment_temp_by_payment(p_patientid  IN NUMBER
+                                   ,p_payment_id IN NUMBER
+                                   ,p_email      IN VARCHAR2
+                                   ,p_phone      IN VARCHAR2
+                                   ,p_rc         IN OUT pkg_global.ref_cursor_type) AS
+    l_result_rec      pkg_global.result_rtype;
+    l_ws_pay_order_id pkg_global.result_rtype;
+
+    p_rc_order pkg_global.ref_cursor_type;
+
+    p_return_url VARCHAR2(400);
+    l_patientid  patient.keyid%TYPE;
+
+  BEGIN
+/*
+    IF p_email IS NULL
+       AND p_phone IS NULL THEN
+      l_result_rec.error_code := pkg_global.err_crit;
+      l_result_rec.error_text := 'Заполните номер телефона или почту!';
+    END IF;
+*/
+    IF l_result_rec.error_code <> pkg_global.err_crit THEN
+      SELECT MAX(pt.patientid)
+        INTO l_patientid
+        FROM payment_total pt
+       WHERE pt.keyid = p_payment_id;
+
+      IF l_patientid <> p_patientid THEN
+        l_result_rec.error_code := pkg_global.err_crit;
+        l_result_rec.error_text := 'Платеж не соответствует пациенту!';
+      END IF;
+    END IF;
+
+    IF l_result_rec.error_code <> pkg_global.err_crit THEN
+      --Параметр адреса возврата
+      p_return_url := p_admin.fn_get_param_value_text('WEB_LK_YANDEX_RETURN_URL');
+
+      /*получение идентификатора от платежной системы вырезал из pkg_ws_pay*/
+      add_order_by_payment_total(p_payment_id, fn_get_only_numbers(p_phone), p_email, p_return_url, 0, p_rc_order);
+
+      FETCH p_rc_order
+        INTO l_ws_pay_order_id;
+
+      l_result_rec.error_code := l_ws_pay_order_id.error_code;
+      l_result_rec.error_text := l_ws_pay_order_id.error_text;
+      l_result_rec.identity   := l_ws_pay_order_id.identity;
+    END IF;
+
+    OPEN p_rc FOR
+      SELECT l_result_rec.error_code AS "ERROR_CODE"
+             ,l_result_rec.error_text AS "ERROR_TEXT"
+             ,l_result_rec.identity   AS "IDENTITY"
+        FROM dual;
+  END payment_temp_by_payment;
+  
+/** 
+* Получение данных для создания платежа
+*/                 
+  PROCEDURE sber_get_payment(p_order_id IN NUMBER
+                          ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      SELECT po.id AS order_number
+            ,round(po.amount*100) AS amount
+            ,po.currency AS currency
+            ,po.payment_total_id AS payment_id
+            ,to_char(po.dat, 'dd.mm.yyyy hh24:mi:ss') AS createDate
+            ,'https://online.sokolovcenter.ru:8443' as  return_url
+            ,po.order_description AS description
+            ,'ru' AS LANGUAGE
+            ,REPLACE(po.email_to_send_check, chr(10), '') AS json_params_email
+            ,to_char(SYSDATE + 1, 'YYYY-MM-DD"T"HH24:MI:SS') AS expiration_date
+            ,(SELECT clob_agg(table_clob_list(nvl(sd.webtext, sd.text)
+                  || '@!@' || sd.keyid
+                  || '@!@' || decode(pkg_price.get_sd_nds_percent(sd.keyid), NULL, '0', 0, '1', 10, '2', 20, '6',22, '8', '1')
+--                  || '@!@' || py.qty
+                  || '@!@' || py.amount
+                              , '#!#', 0, sd.text)) AS srv_info
+                FROM payserv               py
+                    ,patserv               ps
+                    ,srvdep                sd
+               WHERE py.payment_totalid = pt.keyid
+                 AND ps.payservid = py.keyid
+                 AND sd.keyid = ps.srvdepid) as  srv_info
+             ,(select MAX(p.num) from patient p where p.keyid = pt.patientid)as patient_num  -- Для формирования номера заказа
+        FROM inetuser.ws_pay_order po
+            ,payment_total         pt
+       WHERE pt.keyid = po.payment_total_id
+         AND po.id = p_order_id;
+  END sber_get_payment;
+       
+  PROCEDURE sber_get_paymentFromPay(p_payment_id  IN VARCHAR2 -- [строка], идентфикатор платежа (SberPay)
+                                   ,p_rc       IN OUT pkg_global.ref_cursor_type) AS
+    l_order_id          inetuser.ws_pay_order.id%TYPE;
+  BEGIN
+
+    SELECT pp.order_id
+      INTO l_order_id
+      FROM inetuser.ws_pay_payment pp
+     WHERE pp.payment_id = p_payment_id;
+
+    OPEN p_rc FOR
+      SELECT po.id AS order_number
+            ,round(po.amount*100) AS amount
+            ,po.currency AS currency
+            ,po.payment_total_id AS payment_id
+            ,to_char(po.dat, 'dd.mm.yyyy hh24:mi:ss') AS createDate
+            ,'https://online.sokolovcenter.ru:8443' as  return_url
+            ,po.order_description AS description
+            ,'ru' AS LANGUAGE
+            ,nvl(po.email_to_send_check, pay_params_email_def) AS json_params_email
+            ,to_char(SYSDATE + 1, 'YYYY-MM-DD"T"HH24:MI:SS') AS expiration_date
+            ,(SELECT clob_agg(table_clob_list(nvl(sd.webtext, sd.text)
+                  || '@!@' || sd.keyid
+                  || '@!@' || decode(pkg_price.get_sd_nds_percent(sd.keyid), NULL, '0', 0, '1', 10, '2', 20, '6', 22, '8', '1')
+--                  || '@!@' || py.qty
+                  || '@!@' || py.amount
+                              , '#!#', 0, sd.text)) AS srv_info
+                FROM payserv               py
+                    ,patserv               ps
+                    ,srvdep                sd
+               WHERE py.payment_totalid = pt.keyid
+                 AND ps.payservid = py.keyid
+                 AND sd.keyid = ps.srvdepid) as  srv_info
+             ,(select MAX(p.num) from patient p where p.keyid = pt.patientid)as patient_num  -- Для формирования номера заказа
+             ,(SELECT SUM(pf.amount) FROM payment_final pf WHERE pf.payment_id = pt.keyid) AS from_avans_amount  -- Сумма аванса
+        FROM inetuser.ws_pay_order po
+            ,payment_total         pt
+       WHERE pt.keyid = po.payment_total_id
+         AND po.id = l_order_id;
+  END sber_get_paymentFromPay;
+
+  PROCEDURE sber_create_payment(p_order_id       IN inetuser.ws_pay_order.id%TYPE -- [число], идентификатор заказа в МИС
+                             ,p_payment_id       IN VARCHAR2 -- [строка], идентфикатор платежа (PROCESSING.KZ e-commerce)
+                             ,p_confirmation_url IN VARCHAR2 -- [строка], адрес по которому ноужно перейти для оплаты (PROCESSING.KZ e-commerce)
+                             ,p_patient_num      IN NUMBER -- Для почты
+                             ,p_email            IN VARCHAR2 -- Почта для фискалки (+ Обновить у пациента)
+                             ,p_rc               IN OUT pkg_global.ref_cursor_type
+                              )
+  /* Запись только что созданного (ВТБ) платежа в базу (вызывается один раз при создании нового заказа) */
+   AS
+    l_payment_id NUMBER;
+    l_update_count NUMBER;
+    p_return_url VARCHAR2(400);
+    p_rc_order pkg_global.ref_cursor_type;
+  BEGIN
+    SELECT MAX(pp.id)
+      INTO l_payment_id
+      FROM inetuser.ws_pay_payment pp
+     WHERE pp.order_id = p_order_id;
+    IF l_payment_id IS NULL THEN
+      INSERT INTO inetuser.ws_pay_payment
+        (id
+        ,order_id
+        ,payment_id
+        ,add_dat
+        ,status
+        ,paid_status
+        ,confirmation_url
+        ,test_status)
+      VALUES
+        (pkg_global.get_next_id('INETUSER', 'WS_PAY_PAYMENT')
+        ,p_order_id
+        ,p_payment_id
+        ,SYSDATE
+        ,'created'
+        ,0
+        ,p_confirmation_url
+        ,0);
+    ELSE
+      UPDATE inetuser.ws_pay_payment
+         SET payment_id       = p_payment_id
+            ,confirmation_url = p_confirmation_url
+            ,add_dat          = SYSDATE
+       WHERE id = l_payment_id;
+/*
+      --Параметр адреса возврата
+      p_return_url := p_admin.fn_get_param_value_text('WEB_LK_YANDEX_RETURN_URL');
+
+      -- получение идентификатора от платежной системы вырезал из pkg_ws_pay
+      add_order_by_payment_total(l_payment_id, '', p_email, p_return_url, 1, p_rc_order);
+*/
+    END IF;
+
+    -- Обновление платежной системы на заказе
+    UPDATE inetuser.ws_pay_order po
+       SET order_source = sber_kassa
+     WHERE po.id = p_order_id;
+
+     -- Обновляем почту по надобности
+       -- Проверка на почту по умолчанию
+     IF p_email <> pay_params_email_def THEN
+       UPDATE patient
+       SET note = p_email
+       WHERE num = p_patient_num and note is null;
+       l_update_count := SQL%rowcount;
+     END IF;
+/*
+      --Параметр адреса возврата
+      p_return_url := p_admin.fn_get_param_value_text('WEB_LK_YANDEX_RETURN_URL');
+
+      -- получение идентификатора от платежной системы вырезал из pkg_ws_pay
+      add_order_by_payment_total(p_payment_id, null, p_email, p_return_url, 1, p_rc_order);
+*/
+    OPEN p_rc FOR
+      select po.confirmation_url
+           , po.payment_id
+           , l_update_count
+      FROM inetuser.ws_pay_payment po
+      where po.order_id = p_order_id;
+
+  END sber_create_payment;
+
+/*
+  PROCEDURE sber_get_list_payment_check(p_rc  IN OUT pkg_global.ref_cursor_type) AS
+  BEGIN
+    OPEN p_rc FOR
+      select wp.payment_id, wp.status, po.dat
+      FROM inetuser.ws_pay_payment wp
+      , inetuser.ws_pay_order po
+      where po.id = wp.order_id
+      and po.order_source = sber_kassa
+      and wp.status = 'created'
+      and wp.add_dat> CURRENT_DATE-30
+      and wp.add_dat > to_date('2025-06-30', 'yyyy-mm-dd');
+  END sber_get_list_payment_check;
+*/
+
+  /* Обновление статуса платежа */
+  PROCEDURE sber_update_payment_status(p_payment_id  IN VARCHAR2 -- [строка], идентфикатор платежа (SberPay)
+                                      ,p_payment_num IN VARCHAR2 -- [строка], номер платежа
+                                      ,p_status      IN VARCHAR2 -- [строка], * pending - ждет оплаты * waiting_for_capture - ждет подтверждения получения оплаты (у нас такого не будет) * succeeded - подтвержден (все ок) * canceled - отменен.
+                                      ,p_paid        IN NUMBER -- [число], оплачен, 1 - да, null или 0 нет.
+                                      ,p_rc  IN OUT pkg_global.ref_cursor_type
+                                     ) AS
+    l_payment_row inetuser.ws_pay_payment%ROWTYPE;
+    l_order_row   inetuser.ws_pay_order%ROWTYPE;
+    l_rc          pkg_global.ref_cursor_type;
+
+  BEGIN
+    SELECT pp.*
+      INTO l_payment_row
+      FROM inetuser.ws_pay_payment pp
+     WHERE pp.payment_id = p_payment_id;
+
+    IF l_payment_row.status <> p_status
+       OR l_payment_row.paid_status <> p_paid THEN
+      UPDATE inetuser.ws_pay_payment pp
+         SET status      = p_status
+            ,paid_status = p_paid
+            ,commit_dat  = SYSDATE
+            ,payment_num = p_payment_num
+       WHERE pp.id = l_payment_row.id;
+
+      IF p_status = 'paid'
+         AND p_paid = 1 THEN
+
+        UPDATE inetuser.ws_pay_order po
+           SET status = 1
+         WHERE po.id = l_payment_row.order_id
+           AND po.status <> 1;
+
+        pkg_ws_pay.payment_total_commit_by_order(l_payment_row.order_id, SYSDATE, l_rc);
+        CLOSE l_rc;
+      ELSIF p_status = 'expired' THEN
+        UPDATE inetuser.ws_pay_order po
+           SET status = 2
+         WHERE po.id = l_payment_row.order_id
+           AND po.status <> 1;
+
+        SELECT *
+          INTO l_order_row
+          FROM inetuser.ws_pay_order po
+         WHERE po.id = l_payment_row.order_id;
+
+        COMMIT;
+
+        IF l_order_row.online_payment = 1 THEN
+          p_pay_2.payment_total_delete(l_order_row.payment_total_id, pkg_global.id_yes, 'ALLOWED_PATSERV', l_rc);
+          CLOSE l_rc;
+        END IF;
+
+      END IF;
+    ELSE
+      UPDATE inetuser.ws_pay_payment pp
+         SET commit_dat  = SYSDATE
+       WHERE pp.id = l_payment_row.id;
+    END IF;
+    OPEN p_rc FOR
+    SELECT pp.*
+      FROM inetuser.ws_pay_payment pp
+     WHERE pp.payment_id = p_payment_id;
+
+  END sber_update_payment_status;
+  
 END pkg_web_account_unique_7;

@@ -16,6 +16,7 @@ const sql_create_payment_by_rnumb = "BEGIN "+cfg.db.packageName+".create_payment
 const sql_cancel_appointment = "BEGIN "+cfg.db.packageName+".cancel_appointment(:p_patient_id, :p_rnumb_id, :cursor); END;";
 const sql_get_serv_list_by_rnumb = "BEGIN "+cfg.db.packageName+".get_serv_list_by_rnumb(:p_rnumb_id, :cursor); END;";
 const sql_set_numb_unlock_status = "BEGIN "+cfg.db.packageName+".set_numb_unlock_status(:p_rnumb_id, :cursor); END;";
+const sql_payment_temp_by_payment = "BEGIN "+cfg.db.packageName+".payment_temp_by_payment(:p_patient_id, :p_payment_id, :p_email, :p_phone, :cursor); END;";
 
 
 /**
@@ -291,6 +292,48 @@ app.get("/record/rnumb/cpbyr", global.acsToken, function(req,res) {
             params.p_srv_ids = req.query.srvID;
         }
         execute.executeRes(sql_create_payment_by_rnumb, params)
+            .then(result => {
+                const tmp = format.assocArrayFromJSON(result);
+                res.json(format.getFormatRes(true, tmp[0], null));
+            })
+            .catch(err => {
+                res.json(format.getFormatRes(false, null, err));
+            });
+    } else {
+        res.json(format.getFormatRes(false, null, 'Not params'));
+    }
+});
+
+/**
+ * @api {get} /record/rnumb/paymenttemp 10) Оплата отложенного платежа (TOKEN)
+ * @apiGroup record
+ * @apiVersion 0.0.1
+ *
+ * @apiHeader {String} Authorization Authorization: TOKEN AUTH_TOKEN *
+ * @apiParam {Number} paymentID  ID Платежа
+ * @apiParam {String} email      Почта для уведомления
+ * @apiParam {String} phone      Телефон для уведомления
+ *
+ *
+ *
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *  {
+ *   }
+ *
+ */
+
+app.get("/record/rnumb/paymenttemp", global.acsToken, function(req,res) {
+    let user = global.getAuthUser(req);
+    if (req.query.paymentID) {
+        let params = {p_patient_id: user.patient_id, p_payment_id: req.query.paymentID, p_email: null, p_phone: null};
+        if (req.query.email) {
+            params.p_email = req.query.email;
+        }
+        if (req.query.phone) {
+            params.p_phone = req.query.phone;
+        }
+        execute.executeRes(sql_payment_temp_by_payment, params)
             .then(result => {
                 const tmp = format.assocArrayFromJSON(result);
                 res.json(format.getFormatRes(true, tmp[0], null));

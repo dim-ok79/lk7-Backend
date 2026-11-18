@@ -70,10 +70,13 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
   --29-05-26 Метка TRUECONF
   label_true_conf CONSTANT VARCHAR2(100) :='90714825';
   
+  doc_type_trueconf  CONSTANT NUMBER := 90718355; -- Код типа документа для телемедицины
+  
+-- Для платежей
+  sber_kassa CONSTANT VARCHAR2(100) := 'sber.kassa';
+
 -- Почта для платежей, пациент без почты
   pay_params_email_def VARCHAR2(100) := 'cheque@med122.ru';
-
-  doc_type_trueconf  CONSTANT NUMBER := 90718355; -- Код типа документа для телемедицины
   
   
   TYPE r_docdep IS RECORD(
@@ -791,7 +794,54 @@ CREATE OR REPLACE PACKAGE pkg_web_account_unique_7 IS
                       ,p_rate_text   IN VARCHAR2
                       ,p_rc          IN OUT pkg_global.ref_cursor_type);
                       
+-- PKG_WS_PAY
+    PROCEDURE add_order_by_payment_total(p_payment_total_id    IN payment_total.keyid%TYPE
+                                      ,p_phone_to_send_check IN VARCHAR2
+                                      ,p_email_to_send_check IN VARCHAR2
+                                      ,p_return_url          IN VARCHAR2
+                                      ,p_online_payment      IN NUMBER
+                                      ,p_rc                  IN OUT pkg_global.ref_cursor_type);
                       
-                      
+  /**
+  * Оплата отложенного платежа
+  */
+  PROCEDURE payment_temp_by_payment(p_patientid  IN NUMBER
+                                   ,p_payment_id IN NUMBER
+                                   ,p_email      IN VARCHAR2
+                                   ,p_phone      IN VARCHAR2
+                                   ,p_rc         IN OUT pkg_global.ref_cursor_type);
+
+/** 
+* Получение данных для создания платежа
+*/                 
+  PROCEDURE sber_get_payment(p_order_id IN NUMBER
+                          ,p_rc       IN OUT pkg_global.ref_cursor_type);
+                          
+  PROCEDURE sber_get_paymentFromPay(p_payment_id  IN VARCHAR2 -- [строка], идентфикатор платежа (SberPay)
+                                   ,p_rc       IN OUT pkg_global.ref_cursor_type);
+                                   
+  PROCEDURE sber_create_payment(p_order_id       IN inetuser.ws_pay_order.id%TYPE -- [число], идентификатор заказа в МИС
+                             ,p_payment_id       IN VARCHAR2 -- [строка], идентфикатор платежа (PROCESSING.KZ e-commerce)
+                             ,p_confirmation_url IN VARCHAR2 -- [строка], адрес по которому ноужно перейти для оплаты (PROCESSING.KZ e-commerce)
+                             ,p_patient_num      IN NUMBER -- Для почты
+                             ,p_email            IN VARCHAR2 -- Почта для фискалки (+ Обновить у пациента)
+                             ,p_rc               IN OUT pkg_global.ref_cursor_type
+                              );
+
+/*                              
+  PROCEDURE sber_get_list_payment_check(p_rc  IN OUT pkg_global.ref_cursor_type);
+*/
+  
+  /* Обновление статуса платежа */
+  PROCEDURE sber_update_payment_status(p_payment_id  IN VARCHAR2 -- [строка], идентфикатор платежа (SberPay)
+                                      ,p_payment_num IN VARCHAR2 -- [строка], номер платежа
+                                      ,p_status      IN VARCHAR2 -- [строка], * pending - ждет оплаты * waiting_for_capture - ждет подтверждения получения оплаты (у нас такого не будет) * succeeded - подтвержден (все ок) * canceled - отменен.
+                                      ,p_paid        IN NUMBER -- [число], оплачен, 1 - да, null или 0 нет.
+                                      ,p_rc  IN OUT pkg_global.ref_cursor_type
+                                     );
+  
+                              
+                                   
+                          
 
 END pkg_web_account_unique_7;
